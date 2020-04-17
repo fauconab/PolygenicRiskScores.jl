@@ -1,0 +1,10 @@
+name = "PRS"
+uuid = "c2934c1e-919f-47f2-8897-74860fdc935b"
+authors = ["Julian P Samaroo <jpsamaroo@jpsamaroo.me>"]
+version = "0.1.0"
+
+[deps]
+ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
