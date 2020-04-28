@@ -4,8 +4,10 @@ module PRS
 
 using CSV
 using DataFrames, DataFramesMeta
+using Statistics, Random, LinearAlgebra
 
 include("gigrnd.jl")
+include("mcmc_gtb.jl")
 
 function parse_ref(ref_file, chrom)
     println("Parsing reference file: $ref_file")

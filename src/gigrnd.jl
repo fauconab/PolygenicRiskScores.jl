@@ -1,16 +1,16 @@
 # Ported from PRScs/gigrnd.py
 
-function psi(x, alpha, lam):
+function psi(x, alpha, lam)
     f = -alpha*(cosh(x)-1)-lam*(exp(x)-x-1)
     return f
 end
 
-function dpsi(x, alpha, lam):
+function dpsi(x, alpha, lam)
     f = -alpha*sinh(x)-lam*(exp(x)-1)
     return f
 
 
-function g(x, sd, td, f1, f2):
+function g(x, sd, td, f1, f2)
     if (x >= -sd) && (x <= td)
         f = 1
     elseif x > td
@@ -23,7 +23,7 @@ function g(x, sd, td, f1, f2):
 end
 
 
-function gigrnd(p, a, b):
+function gigrnd(p, a, b)
     # setup -- sample from the two-parameter version gig(lam,omega)
     p = float(p); a = float(a); b = float(b)
     lam = p
