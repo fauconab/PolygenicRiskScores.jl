@@ -1,6 +1,6 @@
 name = "PRS"
 uuid = "c2934c1e-919f-47f2-8897-74860fdc935b"
-authors = ["Julian P Samaroo <jpsamaroo@jpsamaroo.me>"]
+authors = ["Annika Faucon <anni.faucon@gmail.com>","Julian P Samaroo <jpsamaroo@jpsamaroo.me>"]
 version = "0.1.0"
 
 [deps]
