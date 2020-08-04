@@ -8,6 +8,7 @@ end
 function dpsi(x, alpha, lam)
     f = -alpha*sinh(x)-lam*(exp(x)-1)
     return f
+end
 
 
 function g(x, sd, td, f1, f2)

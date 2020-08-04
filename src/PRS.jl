@@ -4,7 +4,7 @@ module PRS
 
 using CSV
 using DataFrames, DataFramesMeta
-using Statistics, Random, LinearAlgebra
+using Statistics, Random, LinearAlgebra, Printf
 
 include("parse_genet.jl")
 include("gigrnd.jl")
@@ -54,17 +54,17 @@ settings = ArgParseSettings()
         default=1:23
     "--beta_std"
         action = :store_true
-        default=false
     "--seed"
         arg_type=Int
 end
 
 function main()
     opts = parse_args(ARGS, settings)
-    for chrom in opts["chrom"]
+    chroms = eval(Meta.parse(opts["chrom"]))
+    for chrom in chroms
         ref_df = parse_ref(opts["ref_dir"] * "/snpinfo_1kg_hm3", chrom)
         vld_df = parse_bim(opts["bim_prefix"], chrom)
-        sst_df = parse_sumstats(ref_df, vld_df, opts["sst_file"], opts["n_gwas"])
+        sst_df = parse_sumstats(ref_df, vld_df, opts["sst_file"], chrom, opts["n_gwas"])
         ld_blk, blk_size = parse_ldblk(opts["ref_dir"], sst_df, chrom)
         mcmc(opts["a"], opts["b"], opts["phi"], sst_df, opts["n_gwas"], ld_blk, blk_size, opts["n_iter"], opts["n_burnin"], opts["thin"], chrom, opts["out_dir"], opts["beta_std"], opts["seed"])
     end
