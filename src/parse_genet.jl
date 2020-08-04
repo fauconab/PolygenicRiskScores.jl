@@ -172,5 +172,32 @@ end
 
 function parse_ldblk(ldblk_dir, sst_df, chrom)
     println("Parsing reference LD on chromosome $chrom")
-    error("Not yet implemented")
+
+    chr_name = ldblk_dir * "/ldblk_1kg_chr" * string(chrom) * ".hdf5"
+    hdf_chr = h5open(chr_name, "r")
+    n_blk = length(hdf_chr)
+    ld_blk = [read(hdf_chr["blk_"*string(blk)]["ldblk"]) for blk in 1:n_blk]
+
+    snp_blk = Vector{String}[]
+    for blk in 1:n_blk
+        push!(snp_blk, read(hdf_chr["blk_"*string(blk)]["snplist"]))
+    end
+
+    blk_size = Int[]
+    mm = 1
+    for blk in 1:n_blk
+        idx = [ii for (ii, snp) in enumerate(snp_blk[blk]) #=if snp in sst_df.SNP=#]
+        push!(blk_size, length(idx))
+        if !isempty(idx)
+            idx_blk = 1:mm+length(idx)-1
+            flip = [1 #=sst_df.FLP[jj]=# for jj in idx_blk]
+            flipM = flip' .* flip
+            ld_blk[blk] = [ld_blk[blk][row,col] .* flipM for (row,col) in Iterators.product(idx,idx)]
+            mm += length(idx)
+        else
+            ld_blk[blk] = Matrix{Float64}[]
+        end
+    end
+
+    return ld_blk, blk_size
 end
