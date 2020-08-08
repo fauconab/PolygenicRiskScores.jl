@@ -9,16 +9,15 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
     end
 
     # derived stats
-    # FIXME: array.T
-    beta_mrg = sst_df.BETA.T
-    maf = sst_df.MAF.T
+    beta_mrg = sst_df.BETA'
+    maf = sst_df.MAF'
     n_pst = (n_iter-n_burnin)/thin
     p = length(sst_df.SNP)
     n_blk = length(ld_blk)
 
     # initialization
-    beta = zeros(p,1)
-    psi = ones(p,1)
+    beta = zeros(p)
+    psi = ones(p)
     sigma = 1.0
     if phi === nothing
         phi = 1.0
@@ -43,17 +42,17 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
             if blk_size[kk] == 0
                 continue
             else
-                idx_blk = range(mm,mm+blk_size[kk])
-                dinvt = ld_blk[kk]+sp.diag(1.0/psi[idx_blk].T[0])
-                dinvt_chol = linalg.cholesky(dinvt)
-                beta_tmp = linalg.solve_triangular(dinvt_chol, beta_mrg[idx_blk], trans='T') + sp.sqrt(sigma/n)*random.randn(len(idx_blk),1)
-                beta[idx_blk] = linalg.solve_triangular(dinvt_chol, beta_tmp, trans='N')
-                quad += sp.dot(sp.dot(beta[idx_blk].T, dinvt), beta[idx_blk])
+                idx_blk = (mm+1):(mm+blk_size[kk])
+                dinvt = ld_blk[kk] .+ Diagonal(1.0 ./ psi[idx_blk]) #psi[idx_blk].T[0]
+                dinvt_chol = Array(cholesky(dinvt))
+                beta_tmp = (transpose(dinvt_chol) \ beta_mrg[idx_blk]) .+ sqrt(sigma/n) .* randn(length(idx_blk))
+                beta[idx_blk] = transpose(dinvt_chol) \ beta_tmp
+                quad += dot(transpose(beta[idx_blk]) * dinvt, beta[idx_blk])
                 mm += blk_size[kk]
             end
         end
 
-        err = max(n/2.0*(1.0-2.0*sum(beta*beta_mrg)+quad), n/2.0*sum(beta^2/psi))
+        err = max(n/2.0*(1.0-2.0*sum(beta*beta_mrg)+quad), n/2.0*sum(beta .^ 2 ./ psi))
         sigma = 1.0/random.gamma((n+p)/2.0, 1.0/err)
 
         delta = random.gamma(a+b, 1.0/(psi+phi))

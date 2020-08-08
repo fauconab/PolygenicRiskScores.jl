@@ -4,7 +4,8 @@ module PRS
 
 using CSV
 using DataFrames, DataFramesMeta
-using Statistics, Random, LinearAlgebra, Printf
+using Distributions, Statistics, Random, LinearAlgebra, Printf
+using HDF5
 
 include("parse_genet.jl")
 include("gigrnd.jl")

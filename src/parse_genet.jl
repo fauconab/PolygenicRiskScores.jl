@@ -93,6 +93,7 @@ function parse_sumstats(ref_df, vld_df, sst_file, chrom, n_subj)
     end
     _sst_df = similar(sst_df, 0)
     deletecols!(_sst_df, :P)
+    _sst_df.MAF = Float64[]
     _sst_df.FLP = Int[]
     for (idx,row) in enumerate(Tables.namedtupleiterator(ref_df))
         haskey(sst_eff, row.SNP) || continue
@@ -184,20 +185,30 @@ function parse_ldblk(ldblk_dir, sst_df, chrom)
     end
 
     blk_size = Int[]
+    _ld_blk = Matrix{Float64}[]
     mm = 1
     for blk in 1:n_blk
-        idx = [ii for (ii, snp) in enumerate(snp_blk[blk]) #=if snp in sst_df.SNP=#]
+        idx = [ii for (ii, snp) in enumerate(snp_blk[blk]) if snp in sst_df.SNP]
         push!(blk_size, length(idx))
         if !isempty(idx)
             idx_blk = 1:mm+length(idx)-1
+            # FIXME: Index into sst_df.FLP
             flip = [1 #=sst_df.FLP[jj]=# for jj in idx_blk]
             flipM = flip' .* flip
-            ld_blk[blk] = [ld_blk[blk][row,col] .* flipM for (row,col) in Iterators.product(idx,idx)]
+            _blk = Matrix{Float64}(undef, length(idx), length(idx))
+            P = collect(Iterators.product(idx,idx))
+            for icol in 1:size(P,2)
+                for irow in 1:size(P,1)
+                    row,col = P[irow,icol]
+                    _blk[irow,icol] = ld_blk[blk][row,col] .* flipM[irow,icol]
+                end
+            end
+            push!(_ld_blk, _blk)
             mm += length(idx)
         else
-            ld_blk[blk] = Matrix{Float64}[]
+            push!(_ld_blk,  Matrix{Float64}(undef, 0, 0))
         end
     end
 
-    return ld_blk, blk_size
+    return _ld_blk, blk_size
 end
