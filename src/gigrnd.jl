@@ -56,7 +56,11 @@ function gigrnd(p, a, b)
     elseif x > 2
         s = sqrt(4/(alpha*cosh(1)+lam))
     elseif x < 1/2
-        s = min(1/lam, log(1+1/alpha+sqrt(1/alpha^2+2/alpha)))
+        if alpha == 0
+            s = 1/lam
+        else
+            s = min(1/lam, log(1+1/alpha+sqrt(1/alpha^2+2/alpha)))
+        end
     end
 
     # find auxiliary parameters

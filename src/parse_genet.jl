@@ -22,46 +22,35 @@ function parse_bim(bim_file, chrom)
     println("$(nrow(df)) SNPs in BIM file")
     return df
 end
-# TODO: Remove need for String method
-#nuc_map(str::String) = String(nuc_map(first(str)))
 nuc_map(char::Char) = nuc_map(Val(char))
 nuc_map(::Val{'A'}) = 'T'
 nuc_map(::Val{'T'}) = 'A'
 nuc_map(::Val{'C'}) = 'G'
 nuc_map(::Val{'G'}) = 'C'
 function permute_snps(df)
-    vcat(
-        df[!,[:SNP,:A1,:A2]],
-        DataFrame(SNP=df.SNP, A1=df.A2, A2=df.A1),
+    unique(vcat(
+        df[:,[:SNP,:A1,:A2]],
+        DataFrame(SNP=df.SNP,
+                  A1=df.A2,
+                  A2=df.A1),
         DataFrame(SNP=df.SNP,
                   A1=nuc_map.(first.(df.A1)),
                   A2=nuc_map.(first.(df.A2))),
         DataFrame(SNP=df.SNP,
                   A1=nuc_map.(first.(df.A2)),
                   A2=nuc_map.(first.(df.A1)))
-    )
+    ))
 end
 function join_snps(ref_df, vld_df, sst_df)
     # TODO: Be more efficient, don't allocate all this memory
-    vld_snps = vld_df[!,[:SNP,:A1,:A2]]
+    vld_snps = vld_df[:,[:SNP,:A1,:A2]]
     ref_snps = permute_snps(ref_df)
     sst_snps = permute_snps(sst_df)
-    snps = unique(vcat(vld_snps, ref_snps, sst_snps))
+    snps = innerjoin(vld_snps, ref_snps, sst_snps, on=[:SNP,:A1,:A2], makeunique=true)
     println("$(nrow(snps)) common SNPs")
     return snps
 end
-function findfuzzysnp(df, snp)
-    for (idx,row) in enumerate(Tables.namedtupleiterator(df))
-        if Tuple(row) == snp
-            return idx
-        elseif (row.SNP,nuc_map(row.A1),nuc_map(row.A1)) == snp
-            return idx
-        end
-    end
-    return nothing
-end
-# FIXME: norm_ppf
-norm_ppf(x) = x
+norm_ppf(x) = quantile(Normal(), x)
 function parse_sumstats(ref_df, vld_df, sst_file, chrom, n_subj)
     println("Parsing summary statistics file: $sst_file")
     sst_df = CSV.File(sst_file) |> DataFrame
@@ -69,18 +58,19 @@ function parse_sumstats(ref_df, vld_df, sst_file, chrom, n_subj)
     sst_df.A2 = tochar(sst_df.A2)
     @assert sst_df.BETA isa Vector{T} where T<:Real
     snps = join_snps(ref_df, vld_df, sst_df)
-    sort!(snps, (:SNP, :A1, :A2))
+    sort!(snps, [:SNP, :A1, :A2])
 
     n_sqrt = sqrt(n_subj)
     sst_eff = Dict{String,Float64}()
     for row in Tables.namedtupleiterator(sst_df)
-        snp_rowidx = findsnp(snps, (row.SNP,row.A1,row.A2))
-        if snp_rowidx !== nothing
+        if hassnp(snps, (row.SNP,row.A1,row.A2)) ||
+           hassnp(snps, (row.SNP,nuc_map.(row.A1),nuc_map.(row.A2)))
             effect_sign = 1
-        else
-            snp_rowidx_flip = findsnp(snps, (row.SNP,row.A2,row.A1))
-            snp_rowidx_flip === nothing && continue
+        elseif hassnp(snps, (row.SNP,row.A2,row.A1)) ||
+               hassnp(snps, (row.SNP,nuc_map.(row.A2),nuc_map.(row.A1)))
             effect_sign = -1
+        else
+            continue
         end
         if hasproperty(row, :BETA)
             beta = row.BETA
@@ -92,9 +82,10 @@ function parse_sumstats(ref_df, vld_df, sst_file, chrom, n_subj)
         sst_eff[row.SNP] = beta_std
     end
     _sst_df = similar(sst_df, 0)
-    deletecols!(_sst_df, :P)
+    select!(_sst_df, Not(:P))
     _sst_df.MAF = Float64[]
     _sst_df.FLP = Int[]
+    _sst_df.BP = Int[]
     for (idx,row) in enumerate(Tables.namedtupleiterator(ref_df))
         haskey(sst_eff, row.SNP) || continue
 
@@ -111,15 +102,15 @@ function parse_sumstats(ref_df, vld_df, sst_file, chrom, n_subj)
             MAF = 1-row.MAF
             FLP = -1
         elseif hassnp(snps, (SNP,nuc_map(A1),nuc_map(A2)))
-            A1 = nuc_map(A1)
-            A2 = nuc_map(A2)
+            A1, A2 = nuc_map(A1), num_map(A2)
             MAF = row.MAF
             FLP = 1
         elseif hassnp(snps, (SNP,nuc_map(A2),nuc_map(A1)))
-            A1 = nuc_map(A2)
-            A2 = nuc_map(A1)
+            A1, A2 = nuc_map(A2), num_map(A1)
             MAF = 1-row.MAF
             FLP = -1
+        else
+            @warn "Didn't find ($SNP,$A1,$A2) in snps"
         end
         push!(_sst_df, (SNP=SNP,CHR=CHR,BP=BP,BETA=BETA,A1=A1,A2=A2,MAF=MAF,FLP=FLP))
     end
@@ -148,18 +139,18 @@ hassnp(snps, row) = findsnp(snps, row) !== nothing
 function binary_range_search(snps, x, col)
     _snps = snps[!,col]
     L = 1
-    R = nrow(snps)+1
+    R = nrow(snps)
     while true
-        L < R || return nothing
+        (L > R) && return nothing
         M = floor(Int, (L+R)/2)
         _x = _snps[M]
         if _x == x
             L,R = M,M
             snps_rows = nrow(snps)
-            while L > 1 && _snps[L - 1] == x
+            while (L > 1) && (_snps[L - 1] == x)
                 L -= 1
             end
-            while R < snps_rows && _snps[R + 1] == x
+            while R < (snps_rows) && (_snps[R + 1] == x)
                 R += 1
             end
             return L,R
@@ -188,23 +179,22 @@ function parse_ldblk(ldblk_dir, sst_df, chrom)
     _ld_blk = Matrix{Float64}[]
     mm = 1
     for blk in 1:n_blk
-        idx = [ii for (ii, snp) in enumerate(snp_blk[blk]) if snp in sst_df.SNP]
+        idx = [(ii,findfirst(s->s==snp, sst_df.SNP)) for (ii, snp) in enumerate(snp_blk[blk]) if snp in sst_df.SNP]
         push!(blk_size, length(idx))
         if !isempty(idx)
-            idx_blk = 1:mm+length(idx)-1
-            # FIXME: Index into sst_df.FLP
-            flip = [1 #=sst_df.FLP[jj]=# for jj in idx_blk]
+            idx_blk = mm:(mm+length(snp_blk[blk])-1)
+            flip = [sst_df.FLP[jj] for jj in last.(idx)]
             flipM = flip' .* flip
             _blk = Matrix{Float64}(undef, length(idx), length(idx))
-            P = collect(Iterators.product(idx,idx))
+            P = collect(Iterators.product(first.(idx),first.(idx)))
             for icol in 1:size(P,2)
                 for irow in 1:size(P,1)
                     row,col = P[irow,icol]
-                    _blk[irow,icol] = ld_blk[blk][row,col] .* flipM[irow,icol]
+                    _blk[irow,icol] = ld_blk[blk][row,col] * flipM[irow,icol]
                 end
             end
             push!(_ld_blk, _blk)
-            mm += length(idx)
+            mm += length(snp_blk[blk])
         else
             push!(_ld_blk,  Matrix{Float64}(undef, 0, 0))
         end
