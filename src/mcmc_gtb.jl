@@ -55,7 +55,7 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
         err = max(n/2.0*(1.0-2.0*sum(beta.*beta_mrg)+quad), n/2.0*sum(beta .^ 2 ./ psi))
         sigma = 1.0/rand(Gamma((n+p)/2.0, 1.0/err))
 
-        delta = rand.(Gamma.(a+b, 1.0/(psi .+ phi)))
+        delta = rand.(Gamma.(a+b, 1.0 ./ (psi .+ phi)))
 
         for jj in 1:p
             psi[jj] = gigrnd(a-0.5, 2.0*delta[jj], n*beta[jj]^2/sigma)
