@@ -1,8 +1,6 @@
 # Ported from PRCcs/src/mcmc_gtb.py
 
-function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, chrom, out_dir, beta_std, seed)
-    println("Initiating MCMC")
-
+function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, chrom, beta_std, seed; verbose=false)
     # seed
     if seed !== nothing
         Random.seed!(seed)
@@ -34,7 +32,7 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
     # MCMC
     for itr in 1:n_iter
         if itr % 100 == 0
-            println("(MCMC) iteration $itr")
+            verbose && @info "(Chromosome $chrom) MCMC iteration $itr"
         end
 
         mm = 1; quad = 0.0
@@ -81,24 +79,10 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
         beta_est ./= sqrt.(2.0 .* maf .* (1.0 .- maf))
     end
 
-    # write posterior effect sizes
-    if phi_updt
-        eff_file = out_dir * @sprintf("_pst_eff_a%d_b%.1f_phiauto_chr%d.txt", a, b, chrom)
-    else
-        eff_file = out_dir * @sprintf("_pst_eff_a%d_b%.1f_phi%1.0e_chr%d.txt", a, b, phi, chrom)
-    end
-
-    # TODO: Write using CSV.jl
-    open(eff_file, "w") do ff
-        for (snp, bp, a1, a2, beta) in zip(sst_df.SNP, sst_df.BP, sst_df.A1, sst_df.A2, beta_est)
-            @printf(ff, "%d\t%s\t%d\t%s\t%s\t%.6e\n", chrom, snp, bp, a1, a2, beta)
-        end
-    end
-
     # print estimated phi
-    if phi_updt
-        @printf("Estimated global shrinkage parameter: %1.2e", phi_est)
+    if phi_updt && verbose
+        @info @sprintf("Estimated global shrinkage parameter: %1.2e", phi_est)
     end
 
-    println("Completed MCMC")
+    return beta_est
 end

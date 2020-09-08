@@ -19,56 +19,109 @@ settings = ArgParseSettings()
 
 @add_arg_table! settings begin
     "--ref_dir"
-        help="Path to the reference panel directory"
-        required=true
+        help = "Path to the reference panel directory"
+        required = true
     "--bim_prefix"
-        help="Directory and prefix of the bim file for the validation set"
-        required=true
+        help = "Directory and prefix of the bim file for the validation set"
+        required = true
     "--sst_file"
-        help="Path to summary statistics file"
-        required=true
+        help = "Path to summary statistics file"
+        required = true
     "--a"
-        arg_type=Float64
-        default=1.0
+        arg_type = Float64
+        default = 1.0
     "--b"
-        arg_type=Float64
-        default=0.5
+        arg_type = Float64
+        default = 0.5
     "--phi"
-        arg_type=Float64
+        arg_type = Float64
     "--n_gwas"
-        help="Sample size of the GWAS"
-        arg_type=Int
-        required=true
+        help = "Sample size of the GWAS"
+        arg_type = Int
+        required = true
     "--n_iter"
-        arg_type=Int
-        default=1000
+        help = "Number of MCMC iterations to perform"
+        arg_type = Int
+        default = 1000
     "--n_burnin"
-        arg_type=Int
-        default=500
+        help = "Number of MCMC burn-in iterations"
+        arg_type = Int
+        default = 500
     "--thin"
-        arg_type=Int
-        default=5
+        arg_type = Int
+        default = 5
     "--out_dir"
-        help="Output directory path"
-        required=true
+        help = "Output file directory and prefix"
+        required = true
+    "--out_header"
+        help = "Write header to output file"
+        action = :store_true
+    "--out_delim"
+        help = "Output file delimiter"
+        default = '\t'
+    "--out_path"
+        help = "Output file path (overrides --out_dir)"
     "--chrom"
-        default=1:23
+        help = "Chromosomes to process"
+        default = 1:23
     "--beta_std"
         action = :store_true
     "--seed"
-        arg_type=Int
+        help = "RNG seed for MCMC"
+        arg_type = Int
+    "--quiet"
+        help = "Disable all unnecessary printing"
+        action = :store_true
 end
 
 function main()
     opts = parse_args(ARGS, settings)
+    verbose = !opts["quiet"]
+
     chroms = eval(Meta.parse(opts["chrom"]))
+    verbose && @info "Selecting chromosomes $chroms"
+
+    ref_dir = opts["ref_dir"]
+    verbose && @info "Parsing reference file: $ref_dir/snpinfo_1kg_hm3"
+    ref_df = parse_ref(ref_dir * "/snpinfo_1kg_hm3", chroms)
+    verbose && @info "$(nrow(ref_df)) SNPs in reference file"
+
+    bim_prefix = opts["bim_prefix"]
+    verbose && @info "Parsing BIM file: $(bim_prefix*".bim")"
+    vld_df = parse_bim(bim_prefix, chroms)
+    verbose && @info "$(nrow(vld_df)) SNPs in BIM file"
+
+    sst_file = opts["sst_file"]
+    verbose && @info "Parsing summary statistics file: $sst_file"
+    sst_df = parse_sumstats(ref_df, vld_df, sst_file, opts["n_gwas"]; verbose=verbose)
+    verbose && @info "$(nrow(sst_df)) SNPs in summary statistics file"
+
     for chrom in chroms
-        ref_df = parse_ref(opts["ref_dir"] * "/snpinfo_1kg_hm3", chrom)
-        vld_df = parse_bim(opts["bim_prefix"], chrom)
-        sst_df = parse_sumstats(ref_df, vld_df, opts["sst_file"], chrom, opts["n_gwas"])
-        ld_blk, blk_size = parse_ldblk(opts["ref_dir"], sst_df, chrom)
-        mcmc(opts["a"], opts["b"], opts["phi"], sst_df, opts["n_gwas"], ld_blk, blk_size, opts["n_iter"], opts["n_burnin"], opts["thin"], chrom, opts["out_dir"], opts["beta_std"], opts["seed"])
+        _main(chrom, sst_df, opts; verbose=verbose)
     end
+end
+function _main(chrom, sst_df, opts; verbose=false)
+    verbose && @info "(Chromosome $chrom) Parsing reference LD"
+    ld_blk, blk_size = parse_ldblk(opts["ref_dir"], sst_df, chrom)
+
+    verbose && @info "(Chromosome $chrom) Initiating MCMC"
+    beta_est = mcmc(opts["a"], opts["b"], opts["phi"], sst_df, opts["n_gwas"], ld_blk, blk_size, opts["n_iter"], opts["n_burnin"], opts["thin"], chrom, opts["beta_std"], opts["seed"]; verbose=verbose)
+    verbose && @info "(Chromosome $chrom) Completed MCMC"
+
+    verbose && @info "(Chromosome $chrom) Writing posterior effect sizes"
+    eff_file = if opts["out_path"] === nothing
+        out_path = opts["out_dir"]
+        phi = opts["phi"]
+        phi_str = phi === nothing ? "auto" : @sprintf("%1.0e", phi)
+        out_path * @sprintf("_pst_eff_a%d_b%.1f_phi%s_chr%d.txt", opts["a"], opts["b"], phi_str, chrom)
+    else
+        opts["out_path"]
+    end
+    out_df = sst_df[:, [:SNP, :BP, :A1, :A2]]
+    out_df[!, :CHR] .= chrom
+    out_df.BETA = map(b->@sprintf("%.6e", b), beta_est)
+    out_df = select(out_df, [:CHR, :SNP, :BP, :A1, :A2, :BETA])
+    CSV.write(eff_file, out_df; header=opts["out_header"], delim=opts["out_delim"])
 end
 
 end # module
