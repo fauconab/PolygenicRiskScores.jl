@@ -58,6 +58,9 @@ function parse_sumstats(ref_df, vld_df, sst_file, n_subj; verbose=false, missing
     sst_df.A1 = tochar(sst_df.A1)
     sst_df.A2 = tochar(sst_df.A2)
     @assert sst_df.BETA isa Vector{T} where T<:Real
+    nucs = Set(['A','C','T','G'])
+    filter!(row->(row.A1 in nucs) && (row.A2 in nucs), sst_df)
+    filter!(row->!(row.P isa Missing), sst_df)
     snps = join_snps(ref_df, vld_df, sst_df; verbose=verbose)
     sort!(snps, [:SNP, :A1, :A2])
 
