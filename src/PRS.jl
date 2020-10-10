@@ -27,6 +27,9 @@ settings = ArgParseSettings()
     "--sst_file"
         help = "Path to summary statistics file"
         required = true
+    "--sst_missing"
+        help = "Indicator for missing data in sumstats file (eg 'NA')"
+        default = ""
     "--a"
         arg_type = Float64
         default = 1.0
@@ -91,16 +94,16 @@ function main()
     vld_df = parse_bim(bim_prefix, chroms)
     verbose && @info "$(nrow(vld_df)) SNPs in BIM file"
 
-    sst_file = opts["sst_file"]
-    verbose && @info "Parsing summary statistics file: $sst_file"
-    sst_df = parse_sumstats(ref_df, vld_df, sst_file, opts["n_gwas"]; verbose=verbose)
-    verbose && @info "$(nrow(sst_df)) SNPs in summary statistics file"
-
     for chrom in chroms
-        _main(chrom, sst_df, opts; verbose=verbose)
+        _main(chrom, ref_df, vld_df, opts; verbose=verbose)
     end
 end
-function _main(chrom, sst_df, opts; verbose=false)
+function _main(chrom, ref_df, vld_df, opts; verbose=false)
+    sst_file = opts["sst_file"]
+    verbose && @info "(Chromosome $chrom) Parsing summary statistics file: $sst_file"
+    sst_df = parse_sumstats(ref_df[ref_df.CHR .== chrom,:], vld_df[vld_df.CHR .== chrom,:], sst_file, opts["n_gwas"]; verbose=verbose, missingstring=opts["sst_missing"])
+    verbose && @info "(Chromosome $chrom) $(nrow(sst_df)) SNPs in summary statistics file"
+
     verbose && @info "(Chromosome $chrom) Parsing reference LD"
     ld_blk, blk_size = parse_ldblk(opts["ref_dir"], sst_df, chrom)
 

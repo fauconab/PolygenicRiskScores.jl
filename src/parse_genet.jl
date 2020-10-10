@@ -53,8 +53,8 @@ function join_snps(ref_df, vld_df, sst_df; verbose=false)
     return snps
 end
 norm_ppf(x) = quantile(Normal(), x)
-function parse_sumstats(ref_df, vld_df, sst_file, n_subj; verbose=false)
-    sst_df = CSV.File(sst_file) |> DataFrame
+function parse_sumstats(ref_df, vld_df, sst_file, n_subj; verbose=false, missingstring="")
+    sst_df = CSV.File(sst_file; missingstring=missingstring) |> DataFrame
     sst_df.A1 = tochar(sst_df.A1)
     sst_df.A2 = tochar(sst_df.A2)
     @assert sst_df.BETA isa Vector{T} where T<:Real
@@ -82,11 +82,7 @@ function parse_sumstats(ref_df, vld_df, sst_file, n_subj; verbose=false)
         beta_std = effect_sign*sign(beta)*abs(norm_ppf(p/2))/n_sqrt
         sst_eff[row.SNP] = beta_std
     end
-    _sst_df = similar(sst_df, 0)
-    select!(_sst_df, Not(:P))
-    _sst_df.MAF = Float64[]
-    _sst_df.FLP = Int[]
-    _sst_df.BP = Int[]
+    _sst_df = DataFrame(SNP=String[],CHR=Int[],BP=Int[],BETA=Float64[],A1=Char[],A2=Char[],MAF=Float64[],FLP=Int[])
     for (idx,row) in enumerate(Tables.namedtupleiterator(ref_df))
         haskey(sst_eff, row.SNP) || continue
 
