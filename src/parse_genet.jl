@@ -102,11 +102,11 @@ function parse_sumstats(ref_df, vld_df, sst_file, n_subj; verbose=false, missing
             MAF = 1-row.MAF
             FLP = -1
         elseif hassnp(snps, (SNP,nuc_map(A1),nuc_map(A2)))
-            A1, A2 = nuc_map(A1), num_map(A2)
+            A1, A2 = nuc_map(A1), nuc_map(A2)
             MAF = row.MAF
             FLP = 1
         elseif hassnp(snps, (SNP,nuc_map(A2),nuc_map(A1)))
-            A1, A2 = nuc_map(A2), num_map(A1)
+            A1, A2 = nuc_map(A2), nuc_map(A1)
             MAF = 1-row.MAF
             FLP = -1
         else
