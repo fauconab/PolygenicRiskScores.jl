@@ -1,33 +1,38 @@
 # Ported from PRCcs/src/mcmc_gtb.py
 
-function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, chrom, beta_std, seed; verbose=false)
+function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, chrom, beta_std, seed; verbose=false, Tval=Float64)
     # seed
     if seed !== nothing
         Random.seed!(seed)
     end
 
     # derived stats
-    beta_mrg = copy(sst_df.BETA)
-    maf = copy(sst_df.MAF)
+    beta_mrg = convert(Vector{Tval}, copy(sst_df.BETA))
+    maf = convert(Vector{Tval}, copy(sst_df.MAF))
     n_pst = (n_iter-n_burnin)/thin
     p = length(sst_df.SNP)
     n_blk = length(ld_blk)
 
     # initialization
-    beta = zeros(p)
-    psi = ones(p)
-    sigma = 1.0
+    beta = zeros(Tval, p)
+    psi = ones(Tval, p)
+    sigma = Tval(1.0)
     if phi === nothing
-        phi = 1.0
+        phi = Tval(1.0)
         phi_updt = true
     else
         phi_updt = false
     end
 
-    beta_est = zeros(p)
-    psi_est = zeros(p)
-    sigma_est = 0.0
-    phi_est = 0.0
+    beta_est = zeros(Tval, p)
+    psi_est = zeros(Tval, p)
+    sigma_est = Tval(0.0)
+    phi_est = Tval(0.0)
+
+    a = Tval(a)
+    b = Tval(b)
+
+    ld_blk = convert.(Ref(Matrix{Tval}), ld_blk)
 
     # MCMC
     for itr in 1:n_iter
@@ -41,9 +46,9 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
                 continue
             else
                 idx_blk = mm:(mm+blk_size[kk]-1)
-                dinvt = ld_blk[kk] .+ Diagonal(1.0 ./ psi[idx_blk])
+                dinvt = ld_blk[kk] .+ Diagonal(Tval(1.0) ./ psi[idx_blk])
                 dinvt_chol = cholesky(dinvt).U
-                beta_tmp = (transpose(dinvt_chol) \ beta_mrg[idx_blk]) .+ sqrt(sigma/n) .* randn(length(idx_blk))
+                beta_tmp = (transpose(dinvt_chol) \ beta_mrg[idx_blk]) .+ sqrt(sigma/n) .* randn(Tval, length(idx_blk))
                 beta[idx_blk] = dinvt_chol \ beta_tmp
                 quad += dot(transpose(beta[idx_blk]) * dinvt, beta[idx_blk])
                 mm += blk_size[kk]

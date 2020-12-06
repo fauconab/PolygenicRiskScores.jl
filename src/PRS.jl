@@ -75,9 +75,9 @@ settings = ArgParseSettings()
     "--quiet"
         help = "Disable all unnecessary printing"
         action = :store_true
-    "--hostsfile"
-        help = "Hostsfile to use for parallel processing"
-        default = nothing
+    "--float32"
+        help = "Makes MCMC operate in 32 bit precision (rather than 64)"
+        action = :store_true
 end
 
 function main()
@@ -104,6 +104,7 @@ function main()
     end
 end
 function _main(chrom, ref_df, vld_df, opts; verbose=false)
+    Tval = opts["float32"] ? Float32 : Float64
     sst_file = opts["sst_file"]
     verbose && @info "(Chromosome $chrom) Parsing summary statistics file: $sst_file"
     t = now()
@@ -117,7 +118,7 @@ function _main(chrom, ref_df, vld_df, opts; verbose=false)
 
     verbose && @info "(Chromosome $chrom) Initiating MCMC"
     t = now()
-    beta_est = mcmc(opts["a"], opts["b"], opts["phi"], sst_df, opts["n_gwas"], ld_blk, blk_size, opts["n_iter"], opts["n_burnin"], opts["thin"], chrom, opts["beta_std"], opts["seed"]; verbose=verbose)
+    beta_est = mcmc(opts["a"], opts["b"], opts["phi"], sst_df, opts["n_gwas"], ld_blk, blk_size, opts["n_iter"], opts["n_burnin"], opts["thin"], chrom, opts["beta_std"], opts["seed"]; verbose=verbose, Tval=Tval)
     verbose && @info "(Chromosome $chrom) Completed MCMC ($(round(now()-t, Dates.Second)))"
 
     verbose && @info "(Chromosome $chrom) Writing posterior effect sizes"
