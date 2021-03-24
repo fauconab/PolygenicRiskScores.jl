@@ -1,17 +1,11 @@
 # Ported from PRScs/gigrnd.py
 
-function psi(x, alpha, lam)
-    f = -alpha*(cosh(x)-1)-lam*(exp(x)-x-1)
-    return f
-end
+@inline psi(x, alpha, lam) = -alpha*(cosh(x)-1)-lam*(exp(x)-x-1)
 
-function dpsi(x, alpha, lam)
-    f = -alpha*sinh(x)-lam*(exp(x)-1)
-    return f
-end
+@inline dpsi(x, alpha, lam) = -alpha*sinh(x)-lam*(exp(x)-1)
 
 
-function g(x, sd, td, f1, f2)
+@inline function g(x, sd, td, f1, f2)
     if (x >= -sd) && (x <= td)
         f = 1
     elseif x > td
@@ -23,8 +17,10 @@ function g(x, sd, td, f1, f2)
     return f
 end
 
-
-function gigrnd(p, a, b)
+@kernel function gigrnd(P, p, _a, _b, R)
+    gidx = @index(Global, Linear)
+    a = _a[gidx]
+    b = _b[gidx]
     # setup -- sample from the two-parameter version gig(lam,omega)
     p = float(p); a = float(a); b = float(b)
     lam = p
@@ -77,10 +73,11 @@ function gigrnd(p, a, b)
     q = td+sd
 
     # random variate generation
+    randidx = 1
     while true
-        U = rand()
-        V = rand()
-        W = rand()
+        U = R[randidx  ,gidx]
+        V = R[randidx+1,gidx]
+        W = R[randidx+2,gidx]
         if U < q/(p+q+r)
             rnd = -sd+q*V
         elseif U < (q+r)/(p+q+r)
@@ -94,6 +91,8 @@ function gigrnd(p, a, b)
         if W*g(rnd, sd, td, f1, f2) <= exp(psi(rnd, alpha, lam))
             break
         end
+        randidx += 3
+        @assert randidx+3 <= size(R,2)
     end
 
     # transform back to the three-parameter version gig(p,a,b)
@@ -103,5 +102,5 @@ function gigrnd(p, a, b)
     end
 
     rnd = rnd/sqrt(a/b)
-    return rnd
+    P[gidx] = rnd
 end

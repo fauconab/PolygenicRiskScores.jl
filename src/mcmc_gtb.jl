@@ -1,21 +1,30 @@
 # Ported from PRCcs/src/mcmc_gtb.py
 
-function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, chrom, beta_std, seed; verbose=false, Tval=Float64)
+backend(::Type{Array}) = KernelAbstractions.CPU()
+mzeros(::Type{Array{T,N}}, args...) where {T,N} = zeros(T, args...)
+mones(::Type{Array{T,N}}, args...) where {T,N} = ones(T, args...)
+mrand(::Type{Array{T,N}}, args...) where {T,N} = rand(T, args...)
+mrandn(::Type{Array{T,N}}, args...) where {T,N} = randn(T, args...)
+
+function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, chrom, beta_std, seed; verbose=false, Tval=Float64, Tarr=Array)
+    Vec = Tarr{Tval, 1}
+    Mat = Tarr{Tval, 2}
+
     # seed
     if seed !== nothing
         Random.seed!(seed)
     end
 
     # derived stats
-    beta_mrg = convert(Vector{Tval}, copy(sst_df.BETA))
-    maf = convert(Vector{Tval}, copy(sst_df.MAF))
+    beta_mrg = convert(Vec, copy(sst_df.BETA))
+    maf = convert(Vec, copy(sst_df.MAF))
     n_pst = (n_iter-n_burnin)/thin
     p = length(sst_df.SNP)
     n_blk = length(ld_blk)
 
     # initialization
-    beta = zeros(Tval, p)
-    psi = ones(Tval, p)
+    beta = mzeros(Vec, p)
+    psi = mones(Vec, p)
     sigma = Tval(1.0)
     if phi === nothing
         phi = Tval(1.0)
@@ -24,15 +33,17 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
         phi_updt = false
     end
 
-    beta_est = zeros(Tval, p)
-    psi_est = zeros(Tval, p)
+    beta_est = mzeros(Vec, p)
+    psi_est = mzeros(Vec, p)
     sigma_est = Tval(0.0)
     phi_est = Tval(0.0)
 
     a = Tval(a)
     b = Tval(b)
 
-    ld_blk = convert.(Ref(Matrix{Tval}), ld_blk)
+    Rlen = 2^2
+
+    ld_blk = convert.(Ref(Mat), ld_blk)
 
     # MCMC
     for itr in 1:n_iter
@@ -48,7 +59,7 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
                 idx_blk = mm:(mm+blk_size[kk]-1)
                 dinvt = ld_blk[kk] .+ Diagonal(Tval(1.0) ./ psi[idx_blk])
                 dinvt_chol = cholesky(dinvt).U
-                beta_tmp = (transpose(dinvt_chol) \ beta_mrg[idx_blk]) .+ sqrt(sigma/n) .* randn(Tval, length(idx_blk))
+                beta_tmp = (transpose(dinvt_chol) \ beta_mrg[idx_blk]) .+ sqrt(sigma/n) .* mrandn(Vec, length(idx_blk))
                 beta[idx_blk] = dinvt_chol \ beta_tmp
                 quad += dot(transpose(beta[idx_blk]) * dinvt, beta[idx_blk])
                 mm += blk_size[kk]
@@ -58,11 +69,11 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
         err = max(n/2.0*(1.0-2.0*sum(beta.*beta_mrg)+quad), n/2.0*sum(beta .^ 2 ./ psi))
         sigma = 1.0/rand(Gamma((n+p)/2.0, 1.0/err))
 
-        delta = rand.(Gamma.(a+b, 1.0 ./ (psi .+ phi)))
+        delta = convert(Vec, rand.(Gamma.(a+b, Array(1.0 ./ (psi .+ phi)))))
 
-        for jj in 1:p
-            psi[jj] = gigrnd(a-0.5, 2.0*delta[jj], n*beta[jj]^2/sigma)
-        end
+        R = mrand(Mat, length(psi), Rlen)
+        gigrnd_F = gigrnd(backend(Tarr), length(psi))
+        wait(gigrnd_F(psi, a-0.5, 2.0 .* delta, n .* (beta .^ 2) ./ sigma, R; ndrange=length(psi)))
         psi[psi .> 1] .= 1.0
 
         if phi_updt
@@ -89,5 +100,5 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
         @info @sprintf("Estimated global shrinkage parameter: %1.2e", phi_est)
     end
 
-    return beta_est
+    return Array(beta_est)
 end

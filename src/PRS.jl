@@ -6,6 +6,8 @@ using CSV
 using DataFrames, DataFramesMeta
 using Dates, Distributions, Statistics, Random, LinearAlgebra, Printf
 using HDF5
+using Requires
+using KernelAbstractions
 
 include("parse_genet.jl")
 include("gigrnd.jl")
@@ -78,6 +80,9 @@ settings = ArgParseSettings()
     "--float32"
         help = "Makes MCMC operate in 32 bit precision (rather than 64)"
         action = :store_true
+    "--cuda"
+        help = "Use a CUDA-compatible GPU for MCMC"
+        action = :store_true
 end
 
 function main()
@@ -105,6 +110,7 @@ function main()
 end
 function _main(chrom, ref_df, vld_df, opts; verbose=false)
     Tval = opts["float32"] ? Float32 : Float64
+    Tarr = opts["cuda"] ? cuarray() : Array
     sst_file = opts["sst_file"]
     verbose && @info "(Chromosome $chrom) Parsing summary statistics file: $sst_file"
     t = now()
@@ -118,7 +124,7 @@ function _main(chrom, ref_df, vld_df, opts; verbose=false)
 
     verbose && @info "(Chromosome $chrom) Initiating MCMC"
     t = now()
-    beta_est = mcmc(opts["a"], opts["b"], opts["phi"], sst_df, opts["n_gwas"], ld_blk, blk_size, opts["n_iter"], opts["n_burnin"], opts["thin"], chrom, opts["beta_std"], opts["seed"]; verbose=verbose, Tval=Tval)
+    beta_est = mcmc(opts["a"], opts["b"], opts["phi"], sst_df, opts["n_gwas"], ld_blk, blk_size, opts["n_iter"], opts["n_burnin"], opts["thin"], chrom, opts["beta_std"], opts["seed"]; verbose=verbose, Tval=Tval, Tarr=Tarr)
     verbose && @info "(Chromosome $chrom) Completed MCMC ($(round(now()-t, Dates.Second)))"
 
     verbose && @info "(Chromosome $chrom) Writing posterior effect sizes"
@@ -137,6 +143,10 @@ function _main(chrom, ref_df, vld_df, opts; verbose=false)
     out_df = select(out_df, [:CHR, :SNP, :BP, :A1, :A2, :BETA])
     CSV.write(eff_file, out_df; header=opts["out_header"], delim=opts["out_delim"])
     verbose && @info "(Chromosome $chrom) finished writing posterior effect sizes ($(round(now()-t, Dates.Second)))"
+end
+
+function __init__()
+    @require CUDA="052768ef-5323-5732-b1bb-66c8b64840ba" include("cuda.jl")
 end
 
 end # module
