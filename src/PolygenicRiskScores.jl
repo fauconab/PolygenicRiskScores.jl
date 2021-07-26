@@ -1,4 +1,4 @@
-module PRS
+module PolygenicRiskScores
 
 ## CSV parsing
 
