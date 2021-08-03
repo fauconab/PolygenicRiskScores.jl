@@ -41,6 +41,7 @@ function mcmc(; a, b, phi, snp_df, beta_vecs, frq_vecs, idx_vecs, sst_df, n, ld_
     psi_est = zeros(p_tot)
     sigma_est = zeros(n_pop)
     phi_est = 0.0
+    delta = zeros(p)
 
     for kk in 1:n_blk
         @assert issymmetric(ld_blk[kk])
@@ -74,29 +75,24 @@ function mcmc(; a, b, phi, snp_df, beta_vecs, frq_vecs, idx_vecs, sst_df, n, ld_
                 end
             end
 
-            err = max(n[pp]/2.0*(1.0-2.0*sum(beta[pp].*beta_vecs[pp])+quad), n[pp]/2.0*sum(beta[pp] .^ 2 ./ psi_pp))
+            err = max(n[pp]/2.0*(1.0-2.0*sum(beta[pp] .* beta_vecs[pp])+quad), n[pp]/2.0*sum(beta[pp] .^ 2 ./ psi_pp))
             sigma[pp] = 1.0/rand(Gamma((n[pp]+p[pp])/2.0, 1.0/err))
         end
 
-        delta = rand.(Gamma.(a+b, 1.0 ./ (psi .+ phi)))
-
+        # TODO: Fold this into threaded loop
         xx = zeros(p_tot)
         for pp in 1:n_pop
             xx[idx_vecs[pp]] .+= n[pp] .* beta[pp] .^ 2 ./ sigma[pp]
         end
+        @sync for jj_iter in Iterators.partition(1:p_tot, Threads.nthreads())
+            Threads.@spawn begin
+                for jj in jj_iter
+                    delta[jj] = rand(Gamma(a+b, 1.0 / (@inbounds psi[jj] + phi)))
 
-        for jj in 1:p_tot
-            while true
-                try
-                    psi[jj] = gigrnd(a-0.5*n_grp[jj], 2.0*delta[jj], xx[jj])
-                    break
-                catch
-                    continue
+                    @inbounds psi[jj] = clamp(gigrnd(a-0.5*n_grp[jj], 2.0*delta[jj], xx[jj]), typemin(Float64), 1.0)
                 end
             end
         end
-
-        psi[psi .> 1] .= 1.0
 
         if phi_updt
             w = rand(Gamma(1.0, 1.0/(phi+1.0)))
@@ -112,13 +108,19 @@ function mcmc(; a, b, phi, snp_df, beta_vecs, frq_vecs, idx_vecs, sst_df, n, ld_
 
         # posterior
         if (itr>n_burnin) && (itr % thin == 0)
-            for pp in 1:n_pop
-                beta_est[pp] = beta_est[pp] + beta[pp] ./ n_pst
-                beta_sq_est[pp] = beta_sq_est[pp] + beta[pp] .^ 2 ./ n_pst
-                sigma_est[pp] = sigma_est[pp] + sigma[pp] ./ n_pst
+            @sync for jj_iter in Iterators.partition(1:p_tot, Threads.nthreads())
+                Threads.@spawn begin
+                    @inbounds for jj in jj_iter
+                        for pp in 1:n_pop
+                            beta_est[pp][jj] += beta[pp][jj] / n_pst
+                            beta_sq_est[pp][jj] += beta[pp][jj] ^ 2 / n_pst
+                            sigma_est[pp][jj] += sigma[pp][jj] / n_pst
+                        end
+                        psi_est[jj] += psi[jj] / n_pst
+                    end
+                end
             end
-            phi_est = phi_est + phi/n_pst
-            psi_est = psi_est + psi/n_pst
+            phi_est += phi/n_pst
         end
     end
 
