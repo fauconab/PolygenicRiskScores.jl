@@ -28,6 +28,7 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
     psi_est = zeros(p)
     sigma_est = 0.0
     phi_est = 0.0
+    delta = zeros(p)
 
     for kk in 1:n_blk
         @assert issymmetric(ld_blk[kk])
@@ -59,15 +60,18 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
             end
         end
 
-        err = max(n/2.0*(1.0-2.0*sum(beta.*beta_mrg)+quad), n/2.0*sum(beta .^ 2 ./ psi))
+        err = max(n/2.0*(1.0-2.0*sum(beta .* beta_mrg)+quad), n/2.0*sum(beta .^ 2 ./ psi))
         sigma = 1.0/rand(Gamma((n+p)/2.0, 1.0/err))
 
-        delta = rand.(Gamma.(a+b, 1.0 ./ (psi .+ phi)))
+        @sync for jj_iter in Iterators.partition(1:p, Threads.nthreads())
+            Threads.@spawn begin
+                for jj in jj_iter
+                    delta[jj] = rand(Gamma(a+b, 1.0 / (@inbounds psi[jj] + phi)))
 
-        for jj in 1:p
-            psi[jj] = gigrnd(a-0.5, 2.0*delta[jj], n*beta[jj]^2/sigma)
+                    @inbounds psi[jj] = clamp(gigrnd(a-0.5, 2.0*delta[jj], n*beta[jj]^2/sigma), typemin(Float64), 1.0)
+                end
+            end
         end
-        psi[psi .> 1] .= 1.0
 
         if phi_updt
             w = rand(Gamma(1.0, 1.0/(phi+1.0)))
@@ -83,10 +87,16 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
 
         # posterior
         if (itr>n_burnin) && (itr % thin == 0)
-            beta_est = beta_est + beta/n_pst
-            psi_est = psi_est + psi/n_pst
-            sigma_est = sigma_est + sigma/n_pst
-            phi_est = phi_est + phi/n_pst
+            @sync for jj_iter in Iterators.partition(1:p, Threads.nthreads())
+                Threads.@spawn begin
+                    @inbounds for jj in jj_iter
+                        beta_est[jj] += beta[jj]/n_pst
+                        psi_est[jj] += psi[jj]/n_pst
+                    end
+                end
+            end
+            sigma_est += sigma/n_pst
+            phi_est += phi/n_pst
         end
     end
 
