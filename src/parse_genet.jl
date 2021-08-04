@@ -1,7 +1,7 @@
 function parse_ref(ref_file::String, chroms::UnitRange)
     df = CSV.File(ref_file) |> DataFrame
-    df.A1 = tochar(df.A1)
-    df.A2 = tochar(df.A2)
+    df.A1 = tochar.(df.A1)
+    df.A2 = tochar.(df.A2)
     @assert df.CHR isa Vector{Int}
     @assert df.BP isa Vector{Int}
     @assert df.MAF isa Vector{T} where T<:Real
@@ -10,13 +10,23 @@ function parse_ref(ref_file::String, chroms::UnitRange)
 end
 parse_ref(ref_file::String, chrom::Integer) =
     parse_ref(ref_file, chrom:chrom)
-tochar(x) = eltype(x) == String ? first.(x) : x
+function tochar(x)::Union{Char,Missing}
+    if x isa String
+        if length(x) == 1
+            return first.(x)
+        else
+            return missing
+        end
+    else
+        x
+    end
+end
 
 function parse_bim(bim_file::String, chroms::UnitRange)
     header = [:CHR, :SNP, :POS, :BP, :A1, :A2]
     df = CSV.File(bim_file*".bim"; header=header) |> DataFrame
-    df.A1 = tochar(df.A1)
-    df.A2 = tochar(df.A2)
+    df.A1 = tochar.(df.A1)
+    df.A2 = tochar.(df.A2)
     @assert df.CHR isa Vector{Int}
     filter!(row->row.CHR in chroms, df)
     return df
@@ -55,12 +65,13 @@ end
 norm_ppf(x) = quantile(Normal(), x)
 function parse_sumstats(ref_df, vld_df, sst_file, n_subj; verbose=false, missingstring="")
     sst_df = CSV.File(sst_file; missingstring=missingstring) |> DataFrame
-    sst_df.A1 = tochar(sst_df.A1)
-    sst_df.A2 = tochar(sst_df.A2)
-    @assert sst_df.BETA isa Vector{T} where T<:Real
+    sst_df.A1 = tochar.(sst_df.A1)
+    sst_df.A2 = tochar.(sst_df.A2)
     nucs = Set(['A','C','T','G'])
     filter!(row->(row.A1 in nucs) && (row.A2 in nucs), sst_df)
-    filter!(row->!(row.P isa Missing), sst_df)
+    filter!(row->!(row.P isa Missing) && !(row.BETA isa Missing), sst_df)
+    sst_df.P = convert(Vector{Float64}, sst_df.P)
+    sst_df.BETA = convert(Vector{Float64}, sst_df.BETA)
     snps = join_snps(ref_df, vld_df, sst_df; verbose=verbose)
     sort!(snps, [:SNP, :A1, :A2])
 
