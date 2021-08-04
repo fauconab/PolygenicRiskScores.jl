@@ -66,7 +66,7 @@ settings = ArgParseSettings()
         help = "Output file path (overrides --out_dir)"
     "--chrom"
         help = "Chromosomes to process"
-        default = "1:23"
+        default = "1:22"
     "--beta_std"
         action = :store_true
     "--seed"
