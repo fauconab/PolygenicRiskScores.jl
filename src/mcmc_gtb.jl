@@ -29,6 +29,11 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
     sigma_est = 0.0
     phi_est = 0.0
 
+    for kk in 1:n_blk
+        @assert issymmetric(ld_blk[kk])
+        ld_blk[kk] = Symmetric(ld_blk[kk])
+    end
+
     if profile
         Profile.start_timer()
     end
@@ -45,7 +50,7 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
                 continue
             else
                 idx_blk = mm:(mm+blk_size[kk]-1)
-                dinvt = ld_blk[kk] .+ Diagonal(1.0 ./ psi[idx_blk])
+                dinvt = Symmetric(ld_blk[kk] .+ Diagonal(1.0 ./ psi[idx_blk]))
                 dinvt_chol = cholesky(dinvt).U
                 beta_tmp = (transpose(dinvt_chol) \ beta_mrg[idx_blk]) .+ sqrt(sigma/n) .* randn(length(idx_blk))
                 beta[idx_blk] = dinvt_chol \ beta_tmp
