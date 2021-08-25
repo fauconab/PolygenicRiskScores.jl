@@ -6,6 +6,7 @@ using CSV
 using DataFrames, DataFramesMeta
 using Dates, Distributions, Statistics, Random, LinearAlgebra, Printf
 using HDF5
+using Profile
 
 include("parse_genet.jl")
 include("gigrnd.jl")
@@ -78,6 +79,9 @@ settings = ArgParseSettings()
     "--hostsfile"
         help = "Hostsfile to use for parallel processing"
         default = nothing
+    "--profile"
+        help = "Enables output of profiling data of the MCMC"
+        action = :store_true
 end
 
 function main()
@@ -117,17 +121,17 @@ function _main(chrom, ref_df, vld_df, opts; verbose=false)
 
     verbose && @info "(Chromosome $chrom) Initiating MCMC"
     t = now()
-    beta_est = mcmc(opts["a"], opts["b"], opts["phi"], sst_df, opts["n_gwas"], ld_blk, blk_size, opts["n_iter"], opts["n_burnin"], opts["thin"], chrom, opts["beta_std"], opts["seed"]; verbose=verbose)
+    out_path = something(opts["out_path"], opts["out_dir"])
+    beta_est = mcmc(opts["a"], opts["b"], opts["phi"], sst_df, opts["n_gwas"], ld_blk, blk_size, opts["n_iter"], opts["n_burnin"], opts["thin"], chrom, opts["beta_std"], opts["seed"]; verbose=verbose, profile=opts["profile"], out_path=out_path)
     verbose && @info "(Chromosome $chrom) Completed MCMC ($(round(now()-t, Dates.Second)))"
 
     verbose && @info "(Chromosome $chrom) Writing posterior effect sizes"
     eff_file = if opts["out_path"] === nothing
-        out_path = opts["out_dir"]
         phi = opts["phi"]
         phi_str = phi === nothing ? "auto" : @sprintf("%1.0e", phi)
         out_path * @sprintf("_pst_eff_a%d_b%.1f_phi%s_chr%d.txt", opts["a"], opts["b"], phi_str, chrom)
     else
-        opts["out_path"]
+        out_path
     end
     t = now()
     out_df = sst_df[:, [:SNP, :BP, :A1, :A2]]

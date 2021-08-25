@@ -1,6 +1,6 @@
 # Ported from PRCcs/src/mcmc_gtb.py
 
-function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, chrom, beta_std, seed; verbose=false)
+function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, chrom, beta_std, seed; verbose=false, profile=false, out_path)
     # seed
     if seed !== nothing
         Random.seed!(seed)
@@ -28,6 +28,10 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
     psi_est = zeros(p)
     sigma_est = 0.0
     phi_est = 0.0
+
+    if profile
+        Profile.start_timer()
+    end
 
     # MCMC
     for itr in 1:n_iter
@@ -65,12 +69,26 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
             phi = rand(Gamma(p*b+0.5, 1.0/(sum(delta)+w)))
         end
 
+        if profile && (itr == n_burnin)
+            # restart profiler
+            Profile.stop_timer()
+            Profile.clear()
+            Profile.start_timer()
+        end
+
         # posterior
         if (itr>n_burnin) && (itr % thin == 0)
             beta_est = beta_est + beta/n_pst
             psi_est = psi_est + psi/n_pst
             sigma_est = sigma_est + sigma/n_pst
             phi_est = phi_est + phi/n_pst
+        end
+    end
+
+    if profile
+        Profile.stop_timer()
+        open("$(out_path)_chr$chrom.cpuprofile", "w") do io
+            Profile.print(io; C=true, mincount=100, maxdepth=100)
         end
     end
 
