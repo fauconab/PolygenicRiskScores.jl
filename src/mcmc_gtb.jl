@@ -1,6 +1,6 @@
 # Ported from PRCcs/src/mcmc_gtb.py
 
-function mcmc(; a, b, phi, snp_df, beta_vecs, frq_vecs, idx_vecs, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, chrom, beta_std, meta, seed, verbose=false)
+function mcmc(; a, b, phi, snp_df, beta_vecs, frq_vecs, idx_vecs, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, chrom, beta_std, meta, seed, verbose=false, profile=false)
     #TODO: fix single-ancestry mode where snp_df, beta_vecs, frq_vecs, idx_vecs are set to nothing
     # seed
     if seed !== nothing
@@ -41,6 +41,10 @@ function mcmc(; a, b, phi, snp_df, beta_vecs, frq_vecs, idx_vecs, sst_df, n, ld_
     psi_est = zeros(p_tot)
     sigma_est = zeros(n_pop)
     phi_est = 0.0
+
+    if profile
+        Profile.start_timer()
+    end
 
     # MCMC
     for itr in 1:n_iter
@@ -94,6 +98,13 @@ function mcmc(; a, b, phi, snp_df, beta_vecs, frq_vecs, idx_vecs, sst_df, n, ld_
             phi = rand(Gamma(p_tot*b+0.5, 1.0/(sum(delta)+w)))
         end
 
+        if profile && (itr == n_burnin)
+            # restart profiler
+            Profile.stop_timer()
+            Profile.clear()
+            Profile.start_timer()
+        end
+
         # posterior
         if (itr>n_burnin) && (itr % thin == 0)
             for pp in 1:n_pop
@@ -104,6 +115,10 @@ function mcmc(; a, b, phi, snp_df, beta_vecs, frq_vecs, idx_vecs, sst_df, n, ld_
             phi_est = phi_est + phi/n_pst
             psi_est = psi_est + psi/n_pst
         end
+    end
+
+    if profile
+        Profile.stop_timer()
     end
 
     # convert standardized beta to per-allele beta

@@ -6,6 +6,7 @@ using CSV
 using DataFrames, DataFramesMeta
 using Dates, Distributions, Statistics, Random, LinearAlgebra, Printf
 using HDF5
+using Profile
 
 include("parse_genet.jl")
 include("gigrnd.jl")
@@ -90,6 +91,9 @@ settings = ArgParseSettings()
     "--hostsfile"
         help = "Hostsfile to use for parallel processing"
         default = nothing
+    "--profile"
+        help = "Enables output of profiling data of the MCMC"
+        action = :store_true
 end
 
 function main()
@@ -156,11 +160,14 @@ function _main(chrom, ref_df, vld_df, opts; verbose=false)
 
     verbose && @info "(Chromosome $chrom) Initiating MCMC"
     t = now()
-    beta_est, extra = mcmc(a=opts["a"], b=opts["b"], phi=opts["phi"], snp_df=snp_df, beta_vecs=beta_vecs, frq_vecs=frq_vecs, idx_vecs=idx_vecs, sst_df=sst_dfs, n=n_gwass, ld_blk=ld_blks, blk_size=blk_sizes, n_iter=opts["n_iter"], n_burnin=opts["n_burnin"], thin=opts["thin"], chrom=chrom, beta_std=opts["beta_std"], meta=meta, seed=opts["seed"], verbose=verbose)
+    beta_est, extra = mcmc(a=opts["a"], b=opts["b"], phi=opts["phi"], snp_df=snp_df, beta_vecs=beta_vecs, frq_vecs=frq_vecs, idx_vecs=idx_vecs, sst_df=sst_dfs, n=n_gwass, ld_blk=ld_blks, blk_size=blk_sizes, n_iter=opts["n_iter"], n_burnin=opts["n_burnin"], thin=opts["thin"], chrom=chrom, beta_std=opts["beta_std"], meta=meta, seed=opts["seed"], verbose=verbose, profile=opts["profile"])
     verbose && @info "(Chromosome $chrom) Completed MCMC ($(round(now()-t, Dates.Second)))"
 
     phi = opts["phi"]
     phi_str = phi === nothing ? "auto" : @sprintf("%1.0e", phi)
+
+    out_dir = opts["out_path"] !== nothing ? dirname(opts["out_path"]) : opts["out_dir"]
+    out_prefix = opts["out_name"] !== nothing ? (opts["out_name"] * "_") : ""
 
     for pp in 1:n_pop
         pop = pops[pp]
@@ -169,15 +176,14 @@ function _main(chrom, ref_df, vld_df, opts; verbose=false)
 
         pop_str = n_pop == 1 ? "" : (pops[pp] * "_")
         eff_file = if opts["out_path"] === nothing
-            out_prefix = opts["out_name"] !== nothing ? (opts["out_name"] * "_") : ""
-            if !isdir(opts["out_dir"])
+            if !isdir(out_dir)
                 @warn "--out_dir does not exist; creating it at $(opts["out_dir"])\nNote: The old behavior of treating --out_dir as a prefix has been removed"
-                mkdir(opts["out_dir"])
+                mkdir(out_dir)
             end
-            joinpath(opts["out_dir"], @sprintf("%s%spst_eff_a%d_b%.1f_phi%s_chr%d.txt", out_prefix, pop_str, opts["a"], opts["b"], phi_str, chrom))
+            joinpath(out_dir, @sprintf("%s%spst_eff_a%d_b%.1f_phi%s_chr%d.txt", out_prefix, pop_str, opts["a"], opts["b"], phi_str, chrom))
         else
             @warn "Prefixing output file with $pop_str"
-            joinpath(dirname(opts["out_path"]), pop_str * basename(opts["out_path"]))
+            joinpath(out_dir, pop_str * basename(opts["out_path"]))
         end
 
         out_df = snp_df[idx_vecs[pp], [:SNP, :BP, :A1, :A2]]
@@ -192,10 +198,10 @@ function _main(chrom, ref_df, vld_df, opts; verbose=false)
         verbose && @info "(Chromosome $chrom) Writing meta posterior effect sizes"
         t = now()
         meta_eff_file = if opts["out_path"] === nothing
-            joinpath(opts["out_dir"], @sprintf("_META_pst_eff_a%d_b%.1f_phi%s_chr%d.txt", opts["a"], opts["b"], phi_str, chrom))
+            joinpath(out_dir, @sprintf("_META_pst_eff_a%d_b%.1f_phi%s_chr%d.txt", opts["a"], opts["b"], phi_str, chrom))
         else
             @warn "Prefixing meta output file with META_"
-            joinpath(dirname(opts["out_path"]), "META_" * basename(opts["out_path"]))
+            joinpath(out_dir, "META_" * basename(opts["out_path"]))
         end
 
         mu = extra.mu
@@ -206,6 +212,13 @@ function _main(chrom, ref_df, vld_df, opts; verbose=false)
         meta_out_df = select(meta_out_df, [:CHR, :SNP, :BP, :A1, :A2, :BETA])
         CSV.write(meta_eff_file, meta_out_df; header=opts["out_header"], delim=opts["out_delim"])
         verbose && @info "(Chromosome $chrom) Finished writing meta posterior effect sizes ($(round(now()-t, Dates.Second)))"
+    end
+
+    if opts["profile"]
+        prof_path = joinpath(out_dir, out_prefix * "chr$chrom.cpuprofile")
+        open(prof_path, "w") do io
+            Profile.print(io; C=true, mincount=100, maxdepth=100)
+        end
     end
 
     if opts["phi"] === nothing && verbose
