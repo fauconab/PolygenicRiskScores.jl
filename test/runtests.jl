@@ -11,8 +11,8 @@ if PRS_DATA_PATH === nothing
         isfile("test.bim") || run(`ln -s PRScs/test_data/test.bim .`)
         isfile("sumstats.txt") || run(`ln -s PRScs/test_data/sumstats.txt .`)
         if !isdir("ldblk_1kg_eur")
-            run(`wget https://www.dropbox.com/s/mt6var0z96vb6fv/ldblk_1kg_eur.tar.gz`)
-            run(`tar xvf ldblk_1kg_eur.tar.gz`)
+            run(`wget -q https://www.dropbox.com/s/mt6var0z96vb6fv/ldblk_1kg_eur.tar.gz`)
+            run(`tar xf ldblk_1kg_eur.tar.gz`)
         end
     end
 end
