@@ -1,7 +1,7 @@
 name = "PolygenicRiskScores"
 uuid = "c2934c1e-919f-47f2-8897-74860fdc935b"
 authors = ["Annika Faucon <anni.faucon@gmail.com>", "Julian P Samaroo <jpsamaroo@jpsamaroo.me>"]
-version = "0.1.0"
+version = "0.1.1"
 
 [deps]
 ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
