@@ -1,22 +1,34 @@
 # Ported from PRCcs/src/mcmc_gtb.py
 
-function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, chrom, beta_std, seed; verbose=false)
+function mcmc(; a, b, phi, snp_df, beta_vecs, frq_vecs, idx_vecs, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, chrom, beta_std, meta, seed, verbose=false)
+    #TODO: fix single-ancestry mode where snp_df, beta_vecs, frq_vecs, idx_vecs are set to nothing
     # seed
     if seed !== nothing
         Random.seed!(seed)
     end
 
     # derived stats
-    beta_mrg = copy(sst_df.BETA)
-    maf = copy(sst_df.MAF)
+    n_pop = length(n)
     n_pst = (n_iter-n_burnin)/thin
-    p = length(sst_df.SNP)
-    n_blk = length(ld_blk)
+    p_tot = length(snp_df.SNP)
+
+    p = [length(beta_vecs[pp]) for pp in 1:n_pop]
+    n_blk = [length(ld_blk[pp]) for pp in 1:n_pop]
+    het = [sqrt.(2.0 .* frq_vecs[pp] .* (1.0 .- frq_vecs[pp])) for pp in 1:n_pop]
+
+    n_grp = zeros(p_tot)
+    for jj in 1:p_tot
+        for pp in 1:n_pop
+            if jj in idx_vecs[pp]
+                n_grp[jj] += 1
+            end
+        end
+    end
 
     # initialization
-    beta = zeros(p)
-    psi = ones(p)
-    sigma = 1.0
+    beta = [zeros(p[pp]) for pp in 1:n_pop]
+    sigma = ones(n_pop)
+    psi = ones(p_tot)
     if phi === nothing
         phi = 1.0
         phi_updt = true
@@ -24,9 +36,10 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
         phi_updt = false
     end
 
-    beta_est = zeros(p)
-    psi_est = zeros(p)
-    sigma_est = 0.0
+    beta_est = [zeros(p[pp]) for pp in 1:n_pop]
+    beta_sq_est = [zeros(p[pp]) for pp in 1:n_pop]
+    psi_est = zeros(p_tot)
+    sigma_est = zeros(n_pop)
     phi_est = 0.0
 
     # MCMC
@@ -35,54 +48,83 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
             verbose && @info "(Chromosome $chrom) MCMC iteration $itr"
         end
 
-        mm = 1; quad = 0.0
-        for kk in 1:n_blk
-            if blk_size[kk] == 0
-                continue
-            else
-                idx_blk = mm:(mm+blk_size[kk]-1)
-                dinvt = ld_blk[kk] .+ Diagonal(1.0 ./ psi[idx_blk])
-                dinvt_chol = cholesky(dinvt).U
-                beta_tmp = (transpose(dinvt_chol) \ beta_mrg[idx_blk]) .+ sqrt(sigma/n) .* randn(length(idx_blk))
-                beta[idx_blk] = dinvt_chol \ beta_tmp
-                quad += dot(transpose(beta[idx_blk]) * dinvt, beta[idx_blk])
-                mm += blk_size[kk]
+        for pp in 1:n_pop
+            mm = 1; quad = 0.0
+            psi_pp = psi[idx_vecs[pp]]
+            for kk in 1:n_blk[pp]
+                if blk_size[pp][kk] == 0
+                    continue
+                else
+                    idx_blk = mm:(mm+blk_size[pp][kk]-1)
+                    dinvt = ld_blk[pp][kk] .+ Diagonal(1.0 ./ psi_pp[idx_blk])
+                    dinvt_chol = cholesky(dinvt).U
+                    beta_tmp = (transpose(dinvt_chol) \ beta_vecs[pp][idx_blk]) .+ sqrt(sigma[pp]/n[pp]) .* randn(length(idx_blk))
+                    beta[pp][idx_blk] = dinvt_chol \ beta_tmp
+                    quad += dot(transpose(beta[pp][idx_blk]) * dinvt, beta[pp][idx_blk])
+                    mm += blk_size[pp][kk]
+                end
             end
-        end
 
-        err = max(n/2.0*(1.0-2.0*sum(beta.*beta_mrg)+quad), n/2.0*sum(beta .^ 2 ./ psi))
-        sigma = 1.0/rand(Gamma((n+p)/2.0, 1.0/err))
+            err = max(n[pp]/2.0*(1.0-2.0*sum(beta[pp].*beta_vecs[pp])+quad), n[pp]/2.0*sum(beta[pp] .^ 2 ./ psi_pp))
+            sigma[pp] = 1.0/rand(Gamma((n[pp]+p[pp])/2.0, 1.0/err))
+        end
 
         delta = rand.(Gamma.(a+b, 1.0 ./ (psi .+ phi)))
 
-        for jj in 1:p
-            psi[jj] = gigrnd(a-0.5, 2.0*delta[jj], n*beta[jj]^2/sigma)
+        xx = zeros(p_tot)
+        for pp in 1:n_pop
+            xx[idx_vecs[pp]] .+= n[pp] .* beta[pp] .^ 2 ./ sigma[pp]
         end
+
+        for jj in 1:p_tot
+            while true
+                try
+                    psi[jj] = gigrnd(a-0.5*n_grp[jj], 2.0*delta[jj], xx[jj])
+                    break
+                catch
+                    continue
+                end
+            end
+        end
+
         psi[psi .> 1] .= 1.0
 
         if phi_updt
             w = rand(Gamma(1.0, 1.0/(phi+1.0)))
-            phi = rand(Gamma(p*b+0.5, 1.0/(sum(delta)+w)))
+            phi = rand(Gamma(p_tot*b+0.5, 1.0/(sum(delta)+w)))
         end
 
         # posterior
         if (itr>n_burnin) && (itr % thin == 0)
-            beta_est = beta_est + beta/n_pst
-            psi_est = psi_est + psi/n_pst
-            sigma_est = sigma_est + sigma/n_pst
+            for pp in 1:n_pop
+                beta_est[pp] = beta_est[pp] + beta[pp] ./ n_pst
+                beta_sq_est[pp] = beta_sq_est[pp] + beta[pp] .^ 2 ./ n_pst
+                sigma_est[pp] = sigma_est[pp] + sigma[pp] ./ n_pst
+            end
             phi_est = phi_est + phi/n_pst
+            psi_est = psi_est + psi/n_pst
         end
     end
 
     # convert standardized beta to per-allele beta
     if !beta_std
-        beta_est ./= sqrt.(2.0 .* maf .* (1.0 .- maf))
+        for pp in 1:n_pop
+            beta_est[pp] ./= het[pp]
+            beta_sq_est[pp] ./= het[pp] .^ 2
+        end
     end
 
-    # print estimated phi
-    if phi_updt && verbose
-        @info @sprintf("Estimated global shrinkage parameter: %1.2e", phi_est)
+    if meta
+        vv = zeros(p_tot)
+        zz = zeros(p_tot)
+        for pp in 1:n_pop
+            vv[idx_vecs[pp]] .+= 1.0 ./ (beta_sq_est[pp] .- beta_est[pp] .^ 2)
+            zz[idx_vecs[pp]] .+= 1.0 ./ (beta_sq_est[pp] .- beta_est[pp] .^ 2) .* beta_est[pp]
+        end
+        mu = zz ./ vv
+    else
+        mu = nothing
     end
 
-    return beta_est
+    return beta_est, (;phi_est=phi_est, mu=mu)
 end
