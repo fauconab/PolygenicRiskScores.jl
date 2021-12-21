@@ -1,5 +1,5 @@
 function parse_ref(ref_file::String, chroms::UnitRange)
-    df = CSV.File(ref_file) |> DataFrame
+    df = CSV.File(ref_file; types=Dict(:A1=>Char,:A2=>Char)) |> DataFrame
     df.A1 = tochar.(df.A1)
     df.A2 = tochar.(df.A2)
     @assert df.CHR isa Vector{Int}
@@ -24,7 +24,7 @@ end
 
 function parse_bim(bim_file::String, chroms::UnitRange)
     header = [:CHR, :SNP, :POS, :BP, :A1, :A2]
-    df = CSV.File(bim_file*".bim"; header=header) |> DataFrame
+    df = CSV.File(bim_file*".bim"; header=header, types=Dict(:A1=>Char,:A2=>Char)) |> DataFrame
     df.A1 = tochar.(df.A1)
     df.A2 = tochar.(df.A2)
     @assert df.CHR isa Vector{Int}
@@ -64,7 +64,7 @@ function join_snps(ref_df, vld_df, sst_df; verbose=false)
 end
 norm_ppf(x) = quantile(Normal(), x)
 function parse_sumstats(ref_df, vld_df, sst_file, n_subj; verbose=false, missingstring="")
-    sst_df = CSV.File(sst_file; missingstring=missingstring) |> DataFrame
+    sst_df = CSV.File(sst_file; missingstring=missingstring, types=Dict(:A1=>Char,:A2=>Char)) |> DataFrame
     sst_df.A1 = tochar.(sst_df.A1)
     sst_df.A2 = tochar.(sst_df.A2)
     nucs = Set(['A','C','T','G'])
