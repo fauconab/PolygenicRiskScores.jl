@@ -58,7 +58,7 @@ settings = ArgParseSettings()
         arg_type = Int
         default = 5
     "--out_dir"
-        help = "Output file directory and prefix"
+        help = "Output file directory"
         required = true
     "--out_header"
         help = "Write header to output file"
@@ -170,6 +170,10 @@ function _main(chrom, ref_df, vld_df, opts; verbose=false)
         pop_str = n_pop == 1 ? "" : (pops[pp] * "_")
         eff_file = if opts["out_path"] === nothing
             out_prefix = opts["out_name"] !== nothing ? (opts["out_name"] * "_") : ""
+            if !isdir(opts["out_dir"])
+                @warn "--out_dir does not exist; creating it at $(opts["out_dir"])\nNote: The old behavior of treating --out_dir as a prefix has been removed"
+                mkdir(opts["out_dir"])
+            end
             joinpath(opts["out_dir"], @sprintf("%s%spst_eff_a%d_b%.1f_phi%s_chr%d.txt", out_prefix, pop_str, opts["a"], opts["b"], phi_str, chrom))
         else
             @warn "Prefixing output file with $pop_str"
