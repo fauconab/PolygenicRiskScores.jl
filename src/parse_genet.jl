@@ -1,15 +1,23 @@
-function parse_ref(ref_file::String, chroms::UnitRange)
+function parse_ref(ref_file::String, chroms::UnitRange; multi=false)
     df = CSV.File(ref_file; types=Dict(:A1=>Char,:A2=>Char)) |> DataFrame
     df.A1 = tochar.(df.A1)
     df.A2 = tochar.(df.A2)
     @assert df.CHR isa Vector{Int}
     @assert df.BP isa Vector{Int}
-    @assert df.MAF isa Vector{T} where T<:Real
+    if multi
+        for pop in ("AFR", "AMR", "EAS", "EUR", "SAS")
+            @assert df[!,"FRQ_"*pop] isa Vector{<:Real}
+            @assert df[!,"FLP_"*pop] isa Vector{<:Real}
+        end
+    else
+        @assert df.MAF isa Vector{T} where T<:Real
+    end
     filter!(row->row.CHR in chroms, df)
     return df
 end
-parse_ref(ref_file::String, chrom::Integer) =
-    parse_ref(ref_file, chrom:chrom)
+
+parse_ref(ref_file::String, chrom::Integer; multi=false) =
+    parse_ref(ref_file, chrom:chrom; multi)
 function tochar(x)::Union{Char,Missing}
     if x isa String
         if length(x) == 1
@@ -63,15 +71,24 @@ function join_snps(ref_df, vld_df, sst_df; verbose=false)
     return snps
 end
 norm_ppf(x) = quantile(Normal(), x)
-function parse_sumstats(ref_df, vld_df, sst_file, n_subj; verbose=false, missingstring="")
+
+function parse_sumstats(ref_df, vld_df, sst_file, n_subj, pop=nothing; verbose=false, missingstring="")
     sst_df = CSV.File(sst_file; missingstring=missingstring, types=Dict(:A1=>Char,:A2=>Char)) |> DataFrame
     sst_df.A1 = tochar.(sst_df.A1)
     sst_df.A2 = tochar.(sst_df.A2)
+    @assert sst_df.BETA isa Vector{T} where T<:Real
     nucs = Set(['A','C','T','G'])
     filter!(row->(row.A1 in nucs) && (row.A2 in nucs), sst_df)
     filter!(row->!(row.P isa Missing) && !(row.BETA isa Missing), sst_df)
     sst_df.P = convert(Vector{Float64}, sst_df.P)
     sst_df.BETA = convert(Vector{Float64}, sst_df.BETA)
+
+    frq_col = pop === nothing ? :MAF : Symbol("FRQ_$(uppercase(pop))")
+    flp_col = pop === nothing ? :FLP : Symbol("FLP_$(uppercase(pop))")
+    if pop !== nothing
+        filter!(row->getproperty(row, Symbol("FRQ_$pop")) > 0, ref_df)
+    end
+
     snps = join_snps(ref_df, vld_df, sst_df; verbose=verbose)
     sort!(snps, [:SNP, :A1, :A2])
 
@@ -96,7 +113,7 @@ function parse_sumstats(ref_df, vld_df, sst_file, n_subj; verbose=false, missing
         beta_std = effect_sign*sign(beta)*abs(norm_ppf(p/2))/n_sqrt
         sst_eff[row.SNP] = beta_std
     end
-    _sst_df = DataFrame(SNP=String[],CHR=Int[],BP=Int[],BETA=Float64[],A1=Char[],A2=Char[],MAF=Float64[],FLP=Int[])
+    _sst_df = DataFrame(SNP=String[],CHR=Int[],BP=Int[],BETA=Float64[],A1=Char[],A2=Char[],FRQ=Float64[],FLP=Int[])
     for (idx,row) in enumerate(Tables.namedtupleiterator(ref_df))
         haskey(sst_eff, row.SNP) || continue
 
@@ -106,25 +123,28 @@ function parse_sumstats(ref_df, vld_df, sst_file, n_subj; verbose=false, missing
         BETA = sst_eff[row.SNP]
         A1,A2 = row.A1,row.A2
         if hassnp(snps, (SNP,A1,A2))
-            MAF = row.MAF
+            FRQ = getproperty(row, frq_col)
             FLP = 1
         elseif hassnp(snps, (SNP,A2,A1))
             A1, A2 = A2, A1
-            MAF = 1-row.MAF
+            FRQ = 1-getproperty(row, frq_col)
             FLP = -1
         elseif hassnp(snps, (SNP,nuc_map(A1),nuc_map(A2)))
             A1, A2 = nuc_map(A1), nuc_map(A2)
-            MAF = row.MAF
+            FRQ = getproperty(row, frq_col)
             FLP = 1
         elseif hassnp(snps, (SNP,nuc_map(A2),nuc_map(A1)))
             A1, A2 = nuc_map(A2), nuc_map(A1)
-            MAF = 1-row.MAF
+            FRQ = 1-getproperty(row, frq_col)
             FLP = -1
         else
             verbose && @warn "(Chromosome $CHR) Didn't find ($SNP,$A1,$A2) in snps"
             # FIXME: Skip?
         end
-        push!(_sst_df, (SNP=SNP,CHR=CHR,BP=BP,BETA=BETA,A1=A1,A2=A2,MAF=MAF,FLP=FLP))
+        if pop !== nothing
+            FLP = getproperty(row, flp_col)
+        end
+        push!(_sst_df, (SNP=SNP,CHR=CHR,BP=BP,BETA=BETA,A1=A1,A2=A2,FRQ=FRQ,FLP=FLP))
     end
     return _sst_df
 end
@@ -174,8 +194,12 @@ function binary_range_search(snps, x, col)
     end
 end
 
-function parse_ldblk(ldblk_dir, sst_df, chrom)
-    chr_name = ldblk_dir * "/ldblk_1kg_chr" * string(chrom) * ".hdf5"
+function parse_ldblk(ldblk_dir, sst_df, chrom, pop=nothing)
+    chr_name = if pop === nothing
+        joinpath(ldblk_dir, "ldblk_1kg_chr" * string(chrom) * ".hdf5")
+    else
+        joinpath(ldblk_dir, "ldblk_1kg_" * pop, "ldblk_1kg_chr" * string(chrom) * ".hdf5")
+    end
     hdf_chr = h5open(chr_name, "r")
     n_blk = length(hdf_chr)
     ld_blk = [read(hdf_chr["blk_"*string(blk)]["ldblk"]) for blk in 1:n_blk]
@@ -211,4 +235,32 @@ function parse_ldblk(ldblk_dir, sst_df, chrom)
     end
 
     return _ld_blk, blk_size
+end
+
+function align_ldblk(ref_df, vld_df, sst_dfs, n_pop, chrom)
+    snp_df = DataFrame(CHR=Int[], SNP=String[], BP=Int[], A1=Char[], A2=Char[])
+    for (ii,snp) in enumerate(ref_df.SNP)
+        for pp in 1:n_pop
+            if snp in sst_dfs[pp].SNP
+                CHR = ref_df.CHR[ii]
+                BP = ref_df.BP[ii]
+                vld_ii = findfirst(x -> x == snp, vld_df.SNP)
+                A1 = vld_df.A1[vld_ii]
+                A2 = vld_df.A2[vld_ii]
+                push!(snp_df, (;CHR=CHR,BP=BP,A1=A1,A2=A2,SNP=snp))
+                break
+            end
+        end
+    end
+
+    beta_vecs = Vector{Vector{Float64}}(undef, n_pop)
+    frq_vecs = Vector{Vector{Float64}}(undef, n_pop)
+    idx_vecs = Vector{Vector{Int}}(undef, n_pop)
+    for pp in 1:n_pop
+        beta_vecs[pp] = sst_dfs[pp].BETA
+        frq_vecs[pp] = sst_dfs[pp].FRQ
+        idx_vecs[pp] = [ii for (ii,snp) in enumerate(snp_df.SNP) if snp in sst_dfs[pp].SNP]
+    end
+
+    return snp_df, beta_vecs, frq_vecs, idx_vecs
 end
