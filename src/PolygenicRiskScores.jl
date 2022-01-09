@@ -143,7 +143,7 @@ function _main(chrom, ref_df, vld_df, opts; verbose=false)
         pop = pops[i]
         verbose && @info "(Chromosome $chrom) (Population $pop) Parsing summary statistics file: $sst_file"
         t = now()
-        sst_df = parse_sumstats(sst_file; verbose=verbose, missingstring=opts["sst_missing"])
+        sst_df = parse_sumstats(sst_file, pop; verbose=verbose, missingstring=opts["sst_missing"])
         sst_eff = extract_effect_alleles(sst_df, ngwass[i])
         _ref_df = ref_df[ref_df.CHR .== chrom,:]
         _vld_df = vld_df[vld_df.CHR .== chrom,:]

@@ -82,7 +82,7 @@ norm_ppf(x) = quantile(Normal(), x)
 
 Parse the GWAS summary statistics in `sst_file` and return the clean table as a `DataFrame`.
 """
-function parse_sumstats(sst_file, n_subj, pop=nothing; verbose=false, missingstring="")
+function parse_sumstats(sst_file, pop=nothing; verbose=false, missingstring="")
     sst_df = CSV.File(sst_file; missingstring=missingstring, types=Dict(:A1=>Char,:A2=>Char)) |> DataFrame
     sst_df.A1 = tochar.(sst_df.A1)
     sst_df.A2 = tochar.(sst_df.A2)
