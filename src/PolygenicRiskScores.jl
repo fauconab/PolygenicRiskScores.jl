@@ -144,7 +144,7 @@ function _main(chrom, ref_df, vld_df, opts; verbose=false)
         verbose && @info "(Chromosome $chrom) (Population $pop) Parsing summary statistics file: $sst_file"
         t = now()
         sst_df = parse_sumstats(sst_file, pop; verbose=verbose, missingstring=opts["sst_missing"])
-        sst_eff = extract_effect_alleles(sst_df, ngwass[i])
+        sst_eff = extract_effect_alleles(sst_df, n_gwass[i])
         _ref_df = ref_df[ref_df.CHR .== chrom,:]
         _vld_df = vld_df[vld_df.CHR .== chrom,:]
         snps = join_snps(_ref_df, _vld_df, sst_df; verbose=verbose)
