@@ -1,3 +1,4 @@
+"Read in SNPs from the reference file `ref_file` for the specified chromosomes."
 function parse_ref(ref_file::String, chroms::UnitRange; multi=false)
     df = CSV.File(ref_file; types=Dict(:A1=>Char,:A2=>Char)) |> DataFrame
     df.A1 = tochar.(df.A1)
@@ -30,6 +31,7 @@ function tochar(x)::Union{Char,Missing}
     end
 end
 
+"Read in SNPs from BIM file at `bim_file`.bim for the specified chromosomes."
 function parse_bim(bim_file::String, chroms::UnitRange)
     header = [:CHR, :SNP, :POS, :BP, :A1, :A2]
     df = CSV.File(bim_file*".bim"; header=header, types=Dict(:A1=>Char,:A2=>Char)) |> DataFrame
@@ -47,6 +49,8 @@ nuc_map(::Val{'A'}) = 'T'
 nuc_map(::Val{'T'}) = 'A'
 nuc_map(::Val{'C'}) = 'G'
 nuc_map(::Val{'G'}) = 'C'
+
+"Generate a unique set of permuted SNP pairs."
 function permute_snps(df)
     unique(vcat(
         df[:,[:SNP,:A1,:A2]],
@@ -68,11 +72,17 @@ function join_snps(ref_df, vld_df, sst_df; verbose=false)
     sst_snps = permute_snps(sst_df)
     snps = innerjoin(vld_snps, ref_snps, sst_snps, on=[:SNP,:A1,:A2], makeunique=true)
     verbose && @info "$(nrow(snps)) common SNPs"
+    sort!(snps, [:SNP, :A1, :A2])
     return snps
 end
 norm_ppf(x) = quantile(Normal(), x)
 
-function parse_sumstats(ref_df, vld_df, sst_file, n_subj, pop=nothing; verbose=false, missingstring="")
+"""
+    parse_sumstats(ref_df, vld_df, sst_file, n_subj, pop=nothing; verbose=false, missingstring="") -> DataFrame
+
+Parse the GWAS summary statistics in `sst_file` and return the clean table as a `DataFrame`.
+"""
+function parse_sumstats(sst_file, n_subj, pop=nothing; verbose=false, missingstring="")
     sst_df = CSV.File(sst_file; missingstring=missingstring, types=Dict(:A1=>Char,:A2=>Char)) |> DataFrame
     sst_df.A1 = tochar.(sst_df.A1)
     sst_df.A2 = tochar.(sst_df.A2)
@@ -83,15 +93,15 @@ function parse_sumstats(ref_df, vld_df, sst_file, n_subj, pop=nothing; verbose=f
     sst_df.P = convert(Vector{Float64}, sst_df.P)
     sst_df.BETA = convert(Vector{Float64}, sst_df.BETA)
 
-    frq_col = pop === nothing ? :MAF : Symbol("FRQ_$(uppercase(pop))")
-    flp_col = pop === nothing ? :FLP : Symbol("FLP_$(uppercase(pop))")
     if pop !== nothing
         filter!(row->getproperty(row, Symbol("FRQ_$pop")) > 0, ref_df)
     end
 
-    snps = join_snps(ref_df, vld_df, sst_df; verbose=verbose)
-    sort!(snps, [:SNP, :A1, :A2])
+    return sst_df
+end
 
+"Extract effect alleles and their Beta values."
+function extract_effect_alleles(sst_df, n_subj)
     n_sqrt = sqrt(n_subj)
     sst_eff = Dict{String,Float64}()
     for row in Tables.namedtupleiterator(sst_df)
@@ -113,6 +123,13 @@ function parse_sumstats(ref_df, vld_df, sst_file, n_subj, pop=nothing; verbose=f
         beta_std = effect_sign*sign(beta)*abs(norm_ppf(p/2))/n_sqrt
         sst_eff[row.SNP] = beta_std
     end
+    return sst_eff
+end
+
+"Compute frequencies and flips of effect alleles."
+function compute_frequencies(ref_df, snps, sst_eff, pop; verbose=false)
+    frq_col = pop === nothing ? :MAF : Symbol("FRQ_$(uppercase(pop))")
+    flp_col = pop === nothing ? :FLP : Symbol("FLP_$(uppercase(pop))")
     _sst_df = DataFrame(SNP=String[],CHR=Int[],BP=Int[],BETA=Float64[],A1=Char[],A2=Char[],FRQ=Float64[],FLP=Int[])
     for (idx,row) in enumerate(Tables.namedtupleiterator(ref_df))
         haskey(sst_eff, row.SNP) || continue
@@ -148,7 +165,7 @@ function parse_sumstats(ref_df, vld_df, sst_file, n_subj, pop=nothing; verbose=f
     end
     return _sst_df
 end
-
+"Find a matching SNP in `snps` and return its index."
 function findsnp(snps, (snp,a1,a2))
     SNP_range = binary_range_search(snps, snp, :SNP)
     SNP_range === nothing && return nothing
@@ -194,6 +211,7 @@ function binary_range_search(snps, x, col)
     end
 end
 
+"Read and parse LD blocks for the specified population and chromosome."
 function parse_ldblk(ldblk_dir, sst_df, chrom, pop=nothing)
     chr_name = if pop === nothing
         joinpath(ldblk_dir, "ldblk_1kg_chr" * string(chrom) * ".hdf5")
@@ -208,7 +226,11 @@ function parse_ldblk(ldblk_dir, sst_df, chrom, pop=nothing)
     for blk in 1:n_blk
         push!(snp_blk, read(hdf_chr["blk_"*string(blk)]["snplist"]))
     end
+    return snp_blk, n_blk, ld_blk
+end
 
+"Retain only SNPs that will be used."
+function shrink_ldblk(snp_blk, n_blk, ld_blk, sst_df)
     blk_size = Int[]
     _ld_blk = Matrix{Float64}[]
     mm = 1
@@ -237,6 +259,7 @@ function parse_ldblk(ldblk_dir, sst_df, chrom, pop=nothing)
     return _ld_blk, blk_size
 end
 
+"Create aligned data structures for MCMC."
 function align_ldblk(ref_df, vld_df, sst_dfs, n_pop, chrom)
     snp_df = DataFrame(CHR=Int[], SNP=String[], BP=Int[], A1=Char[], A2=Char[])
     for (ii,snp) in enumerate(ref_df.SNP)

@@ -3,7 +3,7 @@ module PolygenicRiskScores
 ## CSV parsing
 
 using CSV
-using DataFrames, DataFramesMeta
+using DataFrames
 using Dates, Distributions, Statistics, Random, LinearAlgebra, Printf
 using HDF5
 using Profile
@@ -143,13 +143,19 @@ function _main(chrom, ref_df, vld_df, opts; verbose=false)
         pop = pops[i]
         verbose && @info "(Chromosome $chrom) (Population $pop) Parsing summary statistics file: $sst_file"
         t = now()
-        sst_df = parse_sumstats(ref_df[ref_df.CHR .== chrom,:], vld_df[vld_df.CHR .== chrom,:], sst_file, n_gwass[i], pop; verbose=verbose, missingstring=opts["sst_missing"])
+        sst_df = parse_sumstats(sst_file; verbose=verbose, missingstring=opts["sst_missing"])
+        sst_eff = extract_effect_alleles(sst_df, ngwass[i])
+        _ref_df = ref_df[ref_df.CHR .== chrom,:]
+        _vld_df = vld_df[vld_df.CHR .== chrom,:]
+        snps = join_snps(_ref_df, _vld_df, sst_df; verbose=verbose)
+        sst_df = compute_frequencies(_ref_df,snps, sst_eff, pop; verbose=verbose)
         sst_dfs[i] = sst_df
         verbose && @info "(Chromosome $chrom) (Population $pop) $(nrow(sst_df)) SNPs in summary statistics file ($(round(now()-t, Dates.Second)))"
 
         verbose && @info "(Chromosome $chrom) (Population $pop) Parsing reference LD"
         t = now()
-        ld_blks[i], blk_sizes[i] = parse_ldblk(opts["ref_dir"], sst_df, chrom, pop)
+        snp_blk, n_blk, ld_blk = parse_ldblk(opts["ref_dir"], sst_df, chrom, pop)
+        ld_blks[i], blk_sizes[i] = shrink_ldblk(snp_blk, n_blk, ld_blk, sst_df)
         verbose && @info "(Chromosome $chrom) (Population $pop) Completed parsing reference LD ($(round(now()-t, Dates.Second)))"
     end
 
