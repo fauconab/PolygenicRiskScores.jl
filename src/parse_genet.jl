@@ -13,10 +13,12 @@ parse_ref(ref_file::String, chrom::Integer) =
 function tochar(x)::Union{Char,Missing}
     if x isa String
         if length(x) == 1
-            return first.(x)
+            return uppercase(first.(x))
         else
             return missing
         end
+    elseif x isa Char
+        uppercase(x)
     else
         x
     end
@@ -64,14 +66,20 @@ function join_snps(ref_df, vld_df, sst_df; verbose=false)
 end
 norm_ppf(x) = quantile(Normal(), x)
 function parse_sumstats(ref_df, vld_df, sst_file, n_subj; verbose=false, missingstring="")
-    sst_df = CSV.File(sst_file; missingstring=missingstring, types=Dict(:A1=>Char,:A2=>Char)) |> DataFrame
+    sst_df = CSV.File(sst_file; missingstring=missingstring#=, types=Dict(:A1=>Char,:A2=>Char)=#) |> DataFrame
     sst_df.A1 = tochar.(sst_df.A1)
     sst_df.A2 = tochar.(sst_df.A2)
     nucs = Set(['A','C','T','G'])
     filter!(row->(row.A1 in nucs) && (row.A2 in nucs), sst_df)
-    filter!(row->!(row.P isa Missing) && !(row.BETA isa Missing), sst_df)
+    if hasproperty(sst_df, :BETA)
+        filter!(row->!(row.P isa Missing) && !(row.BETA isa Missing), sst_df)
+        sst_df.BETA = convert(Vector{Float64}, sst_df.BETA)
+    elseif hasproperty(sst_df, :OR)
+        filter!(row->!(row.P isa Missing) && !(row.OR isa Missing), sst_df)
+        sst_df.BETA = log.(convert(Vector{Float64}, sst_df.OR))
+        select!(sst_df, Not(:OR))
+    end
     sst_df.P = convert(Vector{Float64}, sst_df.P)
-    sst_df.BETA = convert(Vector{Float64}, sst_df.BETA)
     snps = join_snps(ref_df, vld_df, sst_df; verbose=verbose)
     sort!(snps, [:SNP, :A1, :A2])
 
@@ -87,13 +95,13 @@ function parse_sumstats(ref_df, vld_df, sst_file, n_subj; verbose=false, missing
         else
             continue
         end
-        if hasproperty(row, :BETA)
-            beta = row.BETA
-        elseif hasproperty(row, :OR)
-            beta = log(row.OR)
-        end
+        #if hasproperty(row, :BETA)
+        #    beta = row.BETA
+        #elseif hasproperty(row, :OR)
+        #    beta = log(row.OR)
+        #end
         p = max(row.P, 1e-323)
-        beta_std = effect_sign*sign(beta)*abs(norm_ppf(p/2))/n_sqrt
+        beta_std = effect_sign*sign(row.BETA)*abs(norm_ppf(p/2))/n_sqrt
         sst_eff[row.SNP] = beta_std
     end
     _sst_df = DataFrame(SNP=String[],CHR=Int[],BP=Int[],BETA=Float64[],A1=Char[],A2=Char[],MAF=Float64[],FLP=Int[])

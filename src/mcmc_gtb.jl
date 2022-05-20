@@ -1,6 +1,6 @@
 # Ported from PRCcs/src/mcmc_gtb.py
 
-function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, chrom, beta_std, seed; verbose=false)
+function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, chrom, beta_std, seed; verbose=false, profile=false, out_path)
     # seed
     if seed !== nothing
         Random.seed!(seed)
@@ -28,6 +28,16 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
     psi_est = zeros(p)
     sigma_est = 0.0
     phi_est = 0.0
+    delta = zeros(p)
+
+    for kk in 1:n_blk
+        @assert issymmetric(ld_blk[kk])
+        ld_blk[kk] = Symmetric(ld_blk[kk])
+    end
+
+    if profile
+        Profile.start_timer()
+    end
 
     # MCMC
     for itr in 1:n_iter
@@ -41,7 +51,7 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
                 continue
             else
                 idx_blk = mm:(mm+blk_size[kk]-1)
-                dinvt = ld_blk[kk] .+ Diagonal(1.0 ./ psi[idx_blk])
+                dinvt = Symmetric(ld_blk[kk] .+ Diagonal(1.0 ./ psi[idx_blk]))
                 dinvt_chol = cholesky(dinvt).U
                 beta_tmp = (transpose(dinvt_chol) \ beta_mrg[idx_blk]) .+ sqrt(sigma/n) .* randn(length(idx_blk))
                 beta[idx_blk] = dinvt_chol \ beta_tmp
@@ -50,27 +60,50 @@ function mcmc(a, b, phi, sst_df, n, ld_blk, blk_size, n_iter, n_burnin, thin, ch
             end
         end
 
-        err = max(n/2.0*(1.0-2.0*sum(beta.*beta_mrg)+quad), n/2.0*sum(beta .^ 2 ./ psi))
+        err = max(n/2.0*(1.0-2.0*sum(beta .* beta_mrg)+quad), n/2.0*sum(beta .^ 2 ./ psi))
         sigma = 1.0/rand(Gamma((n+p)/2.0, 1.0/err))
 
-        delta = rand.(Gamma.(a+b, 1.0 ./ (psi .+ phi)))
+        @sync for jj_iter in Iterators.partition(1:p, Threads.nthreads())
+            Threads.@spawn begin
+                for jj in jj_iter
+                    delta[jj] = rand(Gamma(a+b, 1.0 / (@inbounds psi[jj] + phi)))
 
-        for jj in 1:p
-            psi[jj] = gigrnd(a-0.5, 2.0*delta[jj], n*beta[jj]^2/sigma)
+                    @inbounds psi[jj] = clamp(gigrnd(a-0.5, 2.0*delta[jj], n*beta[jj]^2/sigma), typemin(Float64), 1.0)
+                end
+            end
         end
-        psi[psi .> 1] .= 1.0
 
         if phi_updt
             w = rand(Gamma(1.0, 1.0/(phi+1.0)))
             phi = rand(Gamma(p*b+0.5, 1.0/(sum(delta)+w)))
         end
 
+        if profile && (itr == n_burnin)
+            # restart profiler
+            Profile.stop_timer()
+            Profile.clear()
+            Profile.start_timer()
+        end
+
         # posterior
         if (itr>n_burnin) && (itr % thin == 0)
-            beta_est = beta_est + beta/n_pst
-            psi_est = psi_est + psi/n_pst
-            sigma_est = sigma_est + sigma/n_pst
-            phi_est = phi_est + phi/n_pst
+            @sync for jj_iter in Iterators.partition(1:p, Threads.nthreads())
+                Threads.@spawn begin
+                    @inbounds for jj in jj_iter
+                        beta_est[jj] += beta[jj]/n_pst
+                        psi_est[jj] += psi[jj]/n_pst
+                    end
+                end
+            end
+            sigma_est += sigma/n_pst
+            phi_est += phi/n_pst
+        end
+    end
+
+    if profile
+        Profile.stop_timer()
+        open("$(out_path)_chr$chrom.cpuprofile", "w") do io
+            Profile.print(io; C=true, mincount=100, maxdepth=100)
         end
     end
 
